@@ -33,6 +33,20 @@ Item types: `content` (with `startOffsetMs`, which is how a program is split at 
 Ad clips and bumpers are ordinary `filler` items pointing at a clip (a program id) in a filler
 list, with that clip's duration. Choosing the clips is the engine's job ("eager" scheduling).
 
+## A DayTuner lineup appended to the test copy
+
+`daytuner apply` appended a planned 3-day lineup (2520 items: content split at mid breaks, mid,
+post and tail ads, `fallback` interstitials and flex) to the channel "Test Channel" of the test
+copy, on top of a lineup whose end carried a fraction of a millisecond. Checked afterwards:
+
+- The stored items were exactly the items sent (count, types and durations); the lineup grew by
+  exactly the sum sent; the channel's `startTime` did not change.
+- Split programs are continuous: each piece starts at the previous piece's `startOffsetMs` plus its duration.
+- The guide (`GET /api/channels/{id}/lineup?from=&to=`) lists the new programs starting exactly on
+  the 15-minute grid, to the second. `now_playing` still answers.
+- An existing lineup whose end is fractional is handled by one flex (rounded to whole milliseconds)
+  up to the next grid line. After it, everything written is whole milliseconds.
+
 ## The read path (verified on the test copy)
 
 | What | Call | Notes |
@@ -40,7 +54,7 @@ list, with that clip's duration. Choosing the clips is the engine's job ("eager"
 | Channels | `GET /api/channels` | `duration` is fractional, so round it |
 | Stored lineup | `GET /api/channels/{id}/programming` | `lineup` holds the items as written |
 | Filler lists | `GET /api/filler-lists`, then `GET /api/filler-lists/{id}/programs` | one entry per clip; its `duration` is fractional (for example `135732.245`) |
-| Movies, shows | `POST /api/programs/search` with a `type` filter, `page` and `limit` | movies carry `duration` and `genres`; results are paged (`totalPages`) |
+| Movies, shows | `POST /api/programs/search` with a `type` filter, `page` and `limit` | movies carry `duration` and `genres`. **Pages count from 0**: page 1 skips the first `limit` results, and a `limit` at or above the total with page 1 returns nothing. Check the count against `totalHits` |
 | Episodes of a show | `GET /api/programs/{showId}/descendants` | each has `season.index` and `episodeNumber`; sort by those for the viewing order |
 | Chapters | `GET /api/programs/{id}/stream_details` | not on the other program endpoints, so one call per program |
 
@@ -68,7 +82,8 @@ only when `TUNARR_URL` is set, and the integration tests in the client package o
 ## Not verified yet
 
 - Real playback through ffmpeg and the media server for a manually written lineup.
-- The XMLTV guide and the media server's guide after an append (caching was a problem before).
+- The XMLTV guide and the media server's guide after an append (caching was a problem before). Only
+  Tunarr's own guide endpoint is checked, above.
 - How a very long lineup (several years) behaves.
 - Behaviour of `append: true` exactly at the moment a viewer crosses the join.
 

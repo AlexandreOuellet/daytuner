@@ -27,6 +27,7 @@ describe.skipIf(!url)('a real Tunarr (read only)', () => {
   it('reads movies and the episodes of a show', async () => {
     const movies = await c.movies();
     expect(movies.length).toBeGreaterThan(0);
+    expect(new Set(movies.map((m) => m.id)).size).toBe(movies.length); // no page counted twice
     expect(movies.every((m) => Number.isInteger(m.duration))).toBe(true);
     const shows = await c.shows();
     const columbo = shows.find((s) => s.title === 'Columbo');

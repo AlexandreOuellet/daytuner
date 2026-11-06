@@ -79,9 +79,14 @@ const num = (v: unknown, what: string): number => {
 };
 
 export class TunarrClient {
+  /**
+   * @param allowWrites Writing is off unless this is true, so reading code can never write by mistake.
+   *   Only point a writing client at a test copy of Tunarr, never at the one people are watching.
+   */
   constructor(
     private readonly baseUrl: string,
     private readonly fetchImpl: FetchLike = (url, init) => fetch(url, init),
+    private readonly allowWrites = false,
   ) {}
 
   private async request(method: string, path: string, body?: unknown): Promise<unknown> {
@@ -101,6 +106,16 @@ export class TunarrClient {
 
   post(path: string, body: unknown): Promise<unknown> {
     return this.request('POST', path, body);
+  }
+
+  /**
+   * Appends items to the end of a channel's lineup. It only ever appends: the lineup is never
+   * replaced, and the channel's start time is never touched.
+   */
+  async appendLineup(channelId: string, lineup: readonly unknown[]): Promise<void> {
+    if (!this.allowWrites) throw new Error('this client was not created with allowWrites, so it cannot write');
+    if (lineup.length === 0) return;
+    await this.post(`/api/channels/${channelId}/programming`, { type: 'manual', lineup, append: true });
   }
 
   async channels(): Promise<ChannelInfo[]> {
@@ -136,16 +151,26 @@ export class TunarrClient {
     });
   }
 
+  /**
+   * Every result of a search. Tunarr counts pages from 0, and a search that drops results would be
+   * silent, so the number collected is checked against the total the server reports.
+   */
   private async search(filter: Json, pageSize = 200): Promise<Json[]> {
     const out: Json[] = [];
-    for (let page = 1; ; page++) {
+    let totalHits: number | undefined;
+    for (let page = 0; ; page++) {
       const d = rec(
         await this.post('/api/programs/search', { query: { query: null, filter }, page, limit: pageSize }),
         'search',
       );
       out.push(...arr(d['results'], 'results').map((r) => rec(r, 'result')));
-      if (page >= num(d['totalPages'], 'totalPages')) return out;
+      totalHits = num(d['totalHits'], 'totalHits');
+      if (page + 1 >= num(d['totalPages'], 'totalPages')) break;
     }
+    if (out.length !== totalHits) {
+      throw new Error(`the search returned ${out.length} results but Tunarr reports ${totalHits}`);
+    }
+    return out;
   }
 
   /** Every movie in the library. Filtering by genre and length is done by the caller. */

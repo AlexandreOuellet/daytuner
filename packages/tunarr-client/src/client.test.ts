@@ -44,11 +44,12 @@ describe('reading', () => {
     ]);
   });
 
-  it('pages through the movies and reads genres and length', async () => {
+  it('pages through the movies from page 0 and reads genres and length', async () => {
     const page = (n: number) => ({
       results: [{ uuid: `m${n}`, title: `Movie ${n}`, duration: 5_400_000.4, genres: [{ name: 'Comedy' }], year: 1990 + n }],
       page: n,
       totalPages: 2,
+      totalHits: 2,
     });
     const seen: number[] = [];
     const f: FetchLike = async (_url, init) => {
@@ -57,9 +58,16 @@ describe('reading', () => {
       return { ok: true, status: 200, text: async () => JSON.stringify(page(body.page)) };
     };
     const movies = await new TunarrClient('http://tunarr.test', f).movies();
-    expect(seen).toEqual([1, 2]);
-    expect(movies.map((m) => m.id)).toEqual(['m1', 'm2']);
-    expect(movies[0]).toEqual({ id: 'm1', title: 'Movie 1', duration: 5_400_000, genres: ['Comedy'], year: 1991 });
+    expect(seen).toEqual([0, 1]);
+    expect(movies.map((m) => m.id)).toEqual(['m0', 'm1']);
+    expect(movies[0]).toEqual({ id: 'm0', title: 'Movie 0', duration: 5_400_000, genres: ['Comedy'], year: 1990 });
+  });
+
+  it('fails loudly when a search returns fewer results than Tunarr reports', async () => {
+    const f: FetchLike = async () => ({
+      ok: true, status: 200, text: async () => JSON.stringify({ results: [], page: 0, totalPages: 1, totalHits: 175 }),
+    });
+    await expect(new TunarrClient('http://tunarr.test', f).shows()).rejects.toThrow(/returned 0 results but Tunarr reports 175/);
   });
 
   it('orders episodes by season then episode, whatever order Tunarr sends', async () => {
