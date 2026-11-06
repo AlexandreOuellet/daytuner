@@ -73,14 +73,17 @@ Repository, documentation, the verified API facts, and the script that verified 
   until 22:30): slots it entirely covers are removed from that day, and a slot it partly covers is
   cut back. If the cut-back slot cannot accommodate it, the preview warns, and any time the planner
   cannot fill shows as dead air.
+- Ads and bumpers are two kinds of clip, each with its own filler list per position. Ads use head,
+  pre, mid, post and tail; bumpers use head, pre, post and tail (none in mid breaks). Bumpers are
+  outermost at head and tail and nearest the program at pre and post. Bumpers do not
+  count toward the ads ratio, but add to the block's length so it still ends on the grid. Optional
+  **interstitial** clips (Tunarr's `fallback`; music videos, PSAs and the like, one or several) fill
+  a gap nothing else fills; what is left is dead air.
 - Overflow and lateness exist as in Tunarr, per schedule and per slot, and default to 0 so the
   grid stays exact.
 
 ## Open decisions
-- **The ad, bumper and filler model (next).** What a break is, where ads and bumpers go, how long
-  they run, and what the user sets. Tunarr's ad, bumper and filler features are hard to understand,
-  and that is the main complaint this project answers. The draft in `schedules/example.yaml` keeps
-  Tunarr's positions (head, pre, mid, post, tail, fallback) and has not been questioned yet. The
-  planner depends on it, so settle it before writing the engine.
+- **Ad and bumper interface.** The model is decided (see "Decided"). Still open: how the web
+  interface shows the positions plainly.
 - Two details to work out when the planner is written: whether the planned slot or the program starts
   on the grid when head ads are used, and how head and tail minimums add to a planned slot's length.

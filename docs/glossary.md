@@ -35,11 +35,15 @@ word, this one wins.
   holds one block or several (for example four hour-long episodes in a 4-hour window). Its length
   is a whole number of grid steps, and it starts on the grid. Blocks are not locked or committed on
   their own: the planned slot is.
-- **Ad position**: where ads can go: **head** (start of a planned slot), **pre** (before a program),
-  **mid** (breaks inside a program), **post** (after a program), **tail** (end of a planned slot).
-  Head and tail belong to the planned slot; pre, mid and post belong to a block.
-  **Fallback** is one clip stretched over a gap the other positions cannot fill.
-- **Bumper**: a short fixed clip, such as a station ident, around a break.
+- **Position**: where inserted clips can go: **head** (start of a planned slot), **pre** (before a
+  program), **mid** (breaks inside a program), **post** (after a program), **tail** (end of a planned
+  slot). Head and tail belong to the planned slot; pre, mid and post belong to a block.
+- **Ad**: a commercial clip. Ads can use head, pre, mid, post and tail.
+- **Bumper**: a short fixed clip, such as a station ident. Bumpers can use head, pre, post and tail,
+  never mid. Each position has its own list of clips, for ads and for bumpers.
+- **Interstitial**: optional clips (music videos, PSAs, a "Heritage Minute") from a list, used to
+  fill a gap that ads and bumpers cannot. One or several clips. It is the last resort before dead
+  air. (Tunarr calls it `fallback`.)
 - **Flex**: time with no content that Tunarr fills with its own filler or silence.
 - **Dead air**: flex or silence the viewer sees. Counts as advertising when judging a schedule.
 - **Item**: one entry in a lineup: a piece of content, an ad clip, a bumper or flex, with a

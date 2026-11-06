@@ -1,16 +1,21 @@
 # DRAFT format: this is what a channel file is meant to look like. Nothing reads it yet.
 channel: the-funny-bone          # matches the channel in Tunarr
 grid: 15m                        # every program starts on a multiple of this, exactly
-ads:
-  list: Old Ads                  # the filler list the ad clips come from
+ads:                             # each position names its own filler list in Tunarr
   step: 15s                      # planned lengths are multiples of this
-  ratio: { min: 15%, max: 60% }  # ads as a share of the show, inside its block
-  mid:  { every: 8m, length: 2m-3m, tailBuffer: 1m }
-  post: { length: 0-5m }
-  tail: { length: 0-25m }
+  ratio: { min: 15%, max: 60% }  # ads as a share of the show, inside its block (bumpers not counted)
+  mid:  { list: Old Ads, every: 8m, length: 2m-3m, tailBuffer: 1m }
+  post: { list: Old Ads, length: 0-5m }
+  tail: { list: Old Ads, length: 0-25m }
   head: { length: 0 }
   pre:  { length: 0 }
-  fallback: true                 # one clip stretched over a gap the ads cannot fill
+bumpers:                         # no mid: mid breaks are ads only
+  head: { list: Station Idents }
+  pre:  { list: Station Idents }   # nearest the program
+  post: { list: Station Idents }   # nearest the program
+  tail: { list: Station Idents }
+interstitial: { list: Fillers }  # optional: clips (music videos, PSAs...) that fill a gap nothing
+                                 # else fills; what they cannot fill is dead air
 
 overflow: 0                      # as in Tunarr; 0 keeps the grid exact. Per slot override allowed.
 lateness: 0                      # as in Tunarr; 0 keeps the grid exact. Per slot override allowed.

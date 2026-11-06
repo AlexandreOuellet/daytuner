@@ -24,6 +24,19 @@ Terms are defined in [`glossary.md`](glossary.md).
   grid a 22-minute show gets a 30-minute block; the 8 minutes of room are 36% of the show.
   Either ads fill it, or something else must.
 
+## Ads, bumpers and interstitials
+
+- Two kinds of clip, each with its own list per position. **Ads**: head, pre, mid, post, tail.
+  **Bumpers**: head, pre, post, tail (none in mid breaks).
+- Order at the edges: bumpers sit outermost at head and tail, and nearest the program at pre and
+  post. A slot starts head bumper, head ads, pre ads, pre bumper, program. A program ends with post
+  bumper, post ads, then tail ads and tail bumper at the end of the slot.
+- **Bumpers do not count toward the ads ratio**, but they do add to the block's length, which is how
+  the block still ends on the grid (see Blocks).
+- Leftover time that nothing fits is filled by **interstitials**: one or several clips from an
+  optional list (music videos, PSAs and the like), chosen to fit. What they cannot fill is dead air.
+  With no interstitial list configured it is all dead air.
+
 ## Ad positions
 
 - Mid-break positions are *offers*: a break every N minutes of **content time** (ads and bumpers
@@ -39,9 +52,9 @@ Terms are defined in [`glossary.md`](glossary.md).
   steps (so some are one step longer). Compared with "post and tail first", this moved mid-roll
   from 59% to 69% of the ad time and cut blocks with most ads after the show from 50% to 8%.
 - The last block of a window may run to the window's end only if its ads stay within the ratio
-  ceiling and each position's maximum. Otherwise the rest is fallback or dead air.
+  ceiling and each position's maximum. Otherwise the rest is interstitial or dead air.
 - The last 10 to 15 seconds of a break often cannot be filled: the clip list has almost no short
-  clips. A fallback clip (one clip with the leftover time) or more short clips closes it.
+  clips. Interstitial clips, or more short ads, close it.
 
 ## Picking programs
 
