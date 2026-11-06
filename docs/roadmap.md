@@ -7,10 +7,10 @@ plus a metrics dashboard in the web interface (the numbers in [`metrics.md`](met
 and over time, not only the preview printout), and a verified end-to-end run on a test copy of
 Tunarr, including playback and the guide check.
 
-## Phase 0: skeleton (now)
+## Phase 0: skeleton (done)
 Repository, documentation, the verified API facts, and the script that verified them.
 
-## Phase 1: the engine
+## Phase 1: the engine (done)
 - Write the planning code in `packages/engine`, with its tests, from the rules in
   [`planning-rules.md`](planning-rules.md): ad planner, water-filling, packing, fit-aware picking,
   grid and clock handling. There is no earlier implementation to port; the rules came from
@@ -18,12 +18,12 @@ Repository, documentation, the verified API facts, and the script that verified 
 - A pure `plan(schedule, library, state, window)` that returns lineup items and new state.
 - Golden tests: the same schedule and seed always give the same lineup.
 
-## Phase 2: Tunarr client and CLI
+## Phase 2: Tunarr client and CLI (done)
 - Read the library; write manual lineups by appending. DayTuner never uses replace on a committed future.
 - `preview` prints the metrics in [`metrics.md`](metrics.md) for any window.
 - Run end to end on a test copy of Tunarr for one channel.
 
-## Phase 3: state and worker
+## Phase 3: state and worker (built; real playback, guides and a multi-year lineup still to verify)
 - Done: a SQLite store (`packages/store`) with, per channel, the planner state at the committed edge,
   the edge, a copy of the schedule, the commit log and the cursor-adjustment log.
 - Done: a worker (`packages/worker`) that tops up to floor + one step, refuses to write when the store
@@ -118,65 +118,7 @@ Repository, documentation, the verified API facts, and the script that verified 
 - Overflow and lateness exist as in Tunarr, per schedule and per slot, and default to 0 so the
   grid stays exact.
 
-## Open decisions
-- **Ad and bumper interface.** The model is decided (see "Decided"). Still open: how the web
-  interface shows the positions plainly.
+## Open decisions, known gaps and what is next
 
-## Known gaps
-
-Found while building and running phase 2. None is decided; each needs doing or a decision before 1.0.
-
-- **Chapters are not loaded.** Mid breaks use the every-N-minutes fallback for every program,
-  because Tunarr only gives chapters per program, in `stream_details` (one call each). Load them for
-  the programs that get scheduled.
-- **Duplicate show titles.** The test library has two shows called "Scrubs". The resolver refuses an
-  ambiguous title, so the channel file needs a way to name one (an id, or the year).
-- **Warnings name programs by id.** They should use titles; the engine only knows ids, so the titles
-  have to come from the library.
-- **Playback and guides, and a multi-year lineup.** Playback through ffmpeg and the media server, and the XMLTV and media
-  server guides after an append, are not verified, and neither is how a synthetic multi-year lineup
-  behaves (memory, startup, `now_playing`). All phase 3. Only Tunarr's own guide endpoint is checked.
-- **Overflow and lateness above 0** are rejected by the channel file reader; the engine does not
-  support them yet.
-- **One ad block per channel.** No per-slot or per-pool override of ad settings (for example a
-  longer mid-break interval for movies).
-- **An exception that matches no slot is ignored silently.** It should warn.
-- **A lineup whose end is fractional** (older lineups) gets one rounded flex to the next grid line,
-  so it stays up to half a millisecond off the grid from there on. Acceptable, but worth knowing.
-
-- **No way to recover from a refusal.** When the worker stops because Tunarr's lineup differs from the
-  store's record, or the lineup has already run out, or a pending commit matches neither end, a person
-  has to sort it out. There is no `channel resync` command yet to adopt Tunarr's current end.
-- **A verified append that did not match** leaves the commit pending for inspection, with no tool to
-  look at it or close it.
-- **The worker is a one-shot command.** Running it daily is left to cron or a Kubernetes CronJob;
-  there is no scheduler inside DayTuner and no container image yet.
-- **Adding a channel starts from a fresh state.** An existing channel's current place in its shows
-  is not read from its history, so ordered shows begin at their first episode unless adjusted with
-  `cursor set`.
-
-### Engine choices the rules do not state
-
-Made while building phase 1. They are in the code and tested, but nobody has confirmed them.
-
-- **Exception that does not fit.** The owner chose "a warning and dead air". The engine instead plans
-  the slot as it normally would and raises an alert, because a whole window of dead air seemed worse.
-  Confirm or change.
-- **Mid-break offers need refinement later** (the owner's words). In particular the default eligible
-  chapter types (`break` and `chapter`, copied from Tunarr), the optional minimum gap, and how the
-  breaks are spread (equal gaps, ties to the earlier offer).
-- **A shuffled pool repeats when nothing left fits.** If nothing remaining in the bag fits the time
-  left, a program already drawn this round that does fit is repeated (flagged), instead of leaving
-  the time empty. With nothing fitting at all, there is no pick.
-- **Rerun history after a manual adjustment.** A rewind by k removes k episodes of history. Setting
-  the head backward removes the episodes between; setting it forward keeps the history unchanged, so
-  the skipped episodes count as aired. Rewinding from the first episode wraps to the last.
-- **Bumpers can cost a whole grid step.** A 26-minute show fits a 30-minute block, but with 20 s
-  bumpers on each side it goes to 45 minutes, because the ratio minimum already nearly fills 30. It
-  follows the rules as written, and is expensive on a sparse grid.
-- **Best-fit clip search looks at the next 8 clips of the bag.** A tuning choice (it was 12; 8 kept
-  planning fast). A larger window finds slightly better fits.
-- **Starting inside a slot.** If planning starts partway through a slot's window, only the rest of
-  that window is planned, with an info warning. This happens when the end of a lineup is not on a slot
-  boundary.
+These change often, so they live in one place: [`status.md`](status.md).
 

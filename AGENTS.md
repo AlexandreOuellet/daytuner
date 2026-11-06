@@ -2,7 +2,7 @@
 
 - Read `docs/vision.md`, `docs/glossary.md`, `docs/planning-rules.md` and `docs/architecture.md`
   first. The rules come from measurements, and the glossary fixes what slot, planned slot and block
-  mean. `docs/roadmap.md` lists what is decided and what is still open (see "Open decisions").
+  mean. `docs/roadmap.md` lists what is decided; `docs/status.md` tracks what is done, needed for 1.0, open and next.
 - Design before code: settle an open decision with the owner and record it in the docs before
   building it. DayTuner is pushed publicly only as a good working 1.0 (see the roadmap).
 - `packages/engine` stays pure: no network, no database, no `Date.now()`. Inject the clock.
