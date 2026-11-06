@@ -5,7 +5,8 @@ word, this one wins.
 
 ## Time
 
-- **Grid**: the set of times at which programs may start, for example every 15 minutes. A hard rule.
+- **Grid**: the set of times at which blocks start and end, for example every 15 minutes. A hard rule.
+  It applies to the block (the program plus its pre, mid and post ads and bumpers), not to the bare program.
 - **Clock**: the schedule's own time zone and daylight-saving rules. Owned by this project.
 
 ## What a schedule says
@@ -18,7 +19,7 @@ word, this one wins.
 - **Window**: the stretch of time a slot owns, from its start until the next slot starts. A slot's
   length is its window's length. A window can hold one block or several.
 - **Planned slot**: a slot once it has been fully generated for a given day (or hand-modified): its
-  head, its blocks and its tail, with every item on the grid. This is the unit that is staged,
+  head, its blocks and its tail, starting on the grid and with every block ending on it. This is the unit that is staged,
   locked and committed. Example: "Tuesday 13:00, Anchorman, with all its ads".
 - **Pool**: a set of programs a slot draws from. Either **ordered** (a sequence with a cursor) or
   **shuffled** (a bag).
@@ -32,8 +33,8 @@ word, this one wins.
 
 - **Program**: one piece of content: a movie, an episode, a special.
 - **Block**: one program plus what is around it: pre, mid breaks, post and bumpers. A planned slot
-  holds one block or several (for example four hour-long episodes in a 4-hour window). Its length
-  is a whole number of grid steps, and it starts on the grid. Blocks are not locked or committed on
+  holds one block or several (for example four hour-long episodes in a 4-hour window). It ends on
+  the grid, and it starts on the grid too, except the first block of a planned slot that has a head. Blocks are not locked or committed on
   their own: the planned slot is.
 - **Position**: where inserted clips can go: **head** (start of a planned slot), **pre** (before a
   program), **mid** (breaks inside a program), **post** (after a program), **tail** (end of a planned

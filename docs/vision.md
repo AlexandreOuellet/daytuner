@@ -17,8 +17,8 @@ where, when the next program starts, and which episode comes next. Tunarr plays 
    never edits or undoes it. Only staged slots, which are still in DayTuner, can change.
 4. **Measure, do not guess.** Every schedule is judged by the same numbers
    ([`metrics.md`](metrics.md)): grid accuracy, ad share, waits at the end of a slot, dead air.
-5. **The grid is a hard rule.** Programs start on the grid (for example every 15 minutes),
-   exactly, for the whole lineup. Ad lengths flex to make that true.
+5. **The grid is a hard rule.** Slots start and blocks end on the grid (for example every
+   15 minutes), exactly, for the whole lineup. Ad lengths flex to make that true.
 6. **Deterministic.** The same schedule, library and seed give the same lineup.
 
 ## What Tunarr's own scheduling gets wrong for us
@@ -37,7 +37,7 @@ where, when the next program starts, and which episode comes next. Tunarr plays 
 ## Success looks like
 
 - A new channel layout is previewed, reviewed and applied without building an image.
-- Over a 365-day lineup, **100% of programs start within one second of the grid**.
+- Over a 365-day lineup, **100% of blocks end within one second of the grid**.
 - Dead air is a few seconds per program, and a long run of ads after a show is rare and
   visible in the preview before it ever airs.
 - Applying a change never moves what is currently playing.

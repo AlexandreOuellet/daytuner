@@ -5,10 +5,13 @@ Terms are defined in [`glossary.md`](glossary.md).
 
 ## The grid
 
-- Every program starts on the grid (for example every 15 minutes), exactly.
+- Every planned slot starts on the grid (for example every 15 minutes), exactly, and every block
+  ends on it. A block starts on it too, except the first block of a slot that has a head (head
+  bumper and head ads): it starts when the head ends, and still ends on the grid. The grid rule is
+  about the block (the program plus its pre, mid and post ads and bumpers), not the bare program.
 - Every duration written to the lineup is a whole number of milliseconds, and the rounding error
   is carried into the next item. Without this, a few milliseconds a block added up to minutes
-  over a year, and 93% of programs ended up more than 10 seconds off the grid.
+  over a year, and 93% of blocks ended up more than 10 seconds off the grid.
 - A block ends exactly where a window ends. No tolerance, no overflow, no lateness: a late window
   was shown to push the delay into the next window, again and again.
 
@@ -17,9 +20,18 @@ Terms are defined in [`glossary.md`](glossary.md).
 - A block is one program plus what is around it: pre, mid breaks, post, bumpers. A **planned slot**
   (a slot fully generated for a day) holds its head, one or more blocks, and its tail. The planned
   slot is what is staged, locked and committed (see [`glossary.md`](glossary.md)).
-- A block's length is the first grid point at or after `content + bumpers + max(minimum ads,
+- A block ends at the first grid point at or after `start + content + bumpers + max(minimum ads,
   required ads)`. Required ads are the minimums of every position that applies (pre, mid and post
-  for a program). Head and tail minimums belong to the planned slot and count toward its length.
+  for a program). A bumper's length is known once its clip is picked.
+- The head is its bumper clips plus its ads (at least the range minimum, in multiples of the ad
+  step). It does not have to be a grid multiple. The tail is reserved the same way (its minimum) and
+  then takes whatever is left to the window's end. Head and tail minimums belong to the planned slot
+  and are reserved before blocks are picked.
+- **Not enough room.** If the blocks plus the head and tail minimums do not fit the window, pick
+  another program that does fit and warn (for example "20 episodes won't fit this slot", "20 movies
+  won't fit this slot"). A sequential episode that cannot fit also warns (it is never skipped, see
+  Picking programs). If nothing fits and the slot must be committed, the gap is filled by
+  interstitials, then dead air, with a loud warning when scheduling and planning.
 - **The ad ratio is a cap on ads inside the block, not a promise to fill it.** On a 15-minute
   grid a 22-minute show gets a 30-minute block; the 8 minutes of room are 36% of the show.
   Either ads fill it, or something else must.

@@ -79,11 +79,17 @@ Repository, documentation, the verified API facts, and the script that verified 
   count toward the ads ratio, but add to the block's length so it still ends on the grid. Optional
   **interstitial** clips (Tunarr's `fallback`; music videos, PSAs and the like, one or several) fill
   a gap nothing else fills; what is left is dead air.
+- Grid: the rule is about the block (the program plus its pre, mid and post ads and bumpers), not
+  the bare program. A planned slot starts on the grid and every block ends on it. A block starts on
+  it too, except the first block of a slot with a head (head bumper and ads), which starts when the
+  head ends.
+  The head does not have to be a grid multiple; its ads come in ad-step multiples. The tail takes
+  what is left to the window's end. Head and tail minimums are reserved before blocks are picked.
+  If things do not fit: pick another program and warn; warn for a sequential episode; if nothing
+  fits at commit time, interstitials then dead air, with a loud warning.
 - Overflow and lateness exist as in Tunarr, per schedule and per slot, and default to 0 so the
   grid stays exact.
 
 ## Open decisions
 - **Ad and bumper interface.** The model is decided (see "Decided"). Still open: how the web
   interface shows the positions plainly.
-- Two details to work out when the planner is written: whether the planned slot or the program starts
-  on the grid when head ads are used, and how head and tail minimums add to a planned slot's length.
