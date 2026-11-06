@@ -20,7 +20,7 @@ export interface Fill {
 }
 
 /** How many clips of the bag are considered together when looking for the best fit. */
-const WINDOW = 12;
+const WINDOW = 8;
 
 function indexClips(list: readonly Clip[]): Map<string, Clip> {
   const byId = new Map<string, Clip>();

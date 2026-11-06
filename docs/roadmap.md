@@ -98,6 +98,12 @@ Repository, documentation, the verified API facts, and the script that verified 
   changes, since the committed floor means the next week is usually already final.
 - Clips are drawn from a bag per list with a best-fit effort. A break's shortfall is carried to the
   next break, and the last one goes to interstitials, then dead air.
+- Slot linking: `continue` shares one head. `rerun` never moves the head and replays the episodes
+  just behind it, as many as fill its window, oldest first, and only ones that have aired.
+- An exception replaces the slot starting at its time and keeps that slot's window. Anchored
+  planning cuts the window that contains the anchor.
+- Mid breaks are offers, not obligations: they take only the room the block already has after the
+  fixed minimums and never lengthen it, except the fewest the ratio minimum forces.
 - Mid-break offers come from the program's chapters when it has eligible ones, otherwise from a
   fixed interval. The planner uses as many offers as the budget pays for, evenly spread.
 - Overflow and lateness exist as in Tunarr, per schedule and per slot, and default to 0 so the

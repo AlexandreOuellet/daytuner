@@ -27,7 +27,9 @@ word, this one wins.
 - **Bag**: a shuffled pool's memory of what was drawn. Each program is drawn once before any repeats.
 - **Cursor adjustment**: moving an ordered pool's place in its order by hand: rewind by k, or set
   to an episode. It changes the first uncommitted airing onward and never the past.
-- **Slot linking**: slots that share one cursor (`continue`), or all play the same episode (`rerun`).
+- **Head**: the cursor of an ordered pool, the next episode to play.
+- **Slot linking**: slots that share one head (`continue`), or a slot that replays the episodes just
+  behind the head without moving it (`rerun`).
 - **Exception**: a special event that overrides the schedule for a time, as a rule or by working on
   the day in staging.
 

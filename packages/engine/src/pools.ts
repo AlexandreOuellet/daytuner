@@ -108,3 +108,19 @@ export function adjustPosition(position: number, adjustment: CursorAdjustment, l
   const back = adjustment.by % length;
   return (position - back + length) % length;
 }
+
+/**
+ * Where an ordered pool stands. `position` is the head: the next episode to plan. `history` is how
+ * many episodes lie behind it that have aired, which is what a rerun slot may replay.
+ */
+export interface SequenceState {
+  position: number;
+  history: number;
+}
+
+/** A manual adjustment also changes how much history lies behind the head. */
+export function adjustSequence(seq: SequenceState, adjustment: CursorAdjustment, length: number): SequenceState {
+  const position = adjustPosition(seq.position, adjustment, length);
+  const back = adjustment.kind === 'rewind' ? adjustment.by : Math.max(0, seq.position - position);
+  return { position, history: Math.max(0, seq.history - back) };
+}

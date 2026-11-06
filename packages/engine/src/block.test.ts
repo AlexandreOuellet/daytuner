@@ -52,10 +52,10 @@ describe('buildBlock', () => {
     expect(b.end).toBe(m(30));
   });
 
-  it('keeps fewer mid breaks when the ratio maximum does not pay for them all', () => {
+  it('takes fewer mid breaks than offered when the ratio maximum does not pay for them all', () => {
     const b = buildBlock(make({ ads: { ...funnyBone, ratio: { min: 0.1, max: 0.15 } } }));
     expect(b.midBreaks).toHaveLength(1);
-    expect(b.warnings.map((w) => w.code)).toContain('mid-breaks-reduced');
+    expect(b.warnings).toEqual([]); // not taking every offer is normal, not a problem
     expect(total(b)).toBeLessThanOrEqual(m(3) + 15 * SECOND);
   });
 
@@ -92,6 +92,48 @@ describe('buildBlock', () => {
   it('rejects a program of no length and a bad ratio', () => {
     expect(() => buildBlock(make({ content: 0 }))).toThrow(RangeError);
     expect(() => buildBlock(make({ ads: { ...funnyBone, ratio: { min: 0.5, max: 0.1 } } }))).toThrow(RangeError);
+  });
+});
+
+describe('mid breaks are offers, not obligations', () => {
+  it('never makes the block longer to hold more breaks', () => {
+    const none = buildBlock(make({ ads: { ...funnyBone, mid: undefined } }));
+    const offered = buildBlock(make());
+    expect(offered.end).toBe(none.end);
+  });
+
+  it('lets a 97-minute movie keep its 2-hour block and take only the breaks that room pays for', () => {
+    // Offers every 8 minutes would be 12 breaks, but the room at 2 hours pays for fewer than that.
+    const b = buildBlock(make({ content: m(97) + 12_345 }));
+    expect(b.end).toBe(2 * HOUR);
+    expect(b.midBreaks.length).toBeGreaterThan(0);
+    expect(b.midBreaks.length).toBeLessThan(12);
+    expect(b.end - b.start).toBe(b.content + bumpers(b) + total(b) + b.gap);
+  });
+
+  it('takes fewer mid breaks when the pre and post minimums use the room', () => {
+    const lean = buildBlock(make());
+    const heavy = buildBlock(make({ ads: { ...funnyBone, pre: { min: m(2), max: m(4) }, post: { min: m(3), max: m(5) } } }));
+    expect(heavy.end).toBe(lean.end);
+    expect(heavy.midBreaks.length).toBeLessThan(lean.midBreaks.length);
+    expect(heavy.adsPre).toBeGreaterThanOrEqual(m(2));
+    expect(heavy.adsPost).toBeGreaterThanOrEqual(m(3));
+  });
+
+  it('forces just enough breaks to reach the ratio minimum when pre and post cannot', () => {
+    // 60 minutes needs 9 minutes of ads at 15%. Post allows 1 minute, so mid breaks must carry the rest.
+    const b = buildBlock(make({
+      content: m(60),
+      ads: { ...funnyBone, post: { min: 0, max: m(1) }, mid: { range: { min: m(2), max: m(3) }, offers: { every: m(8), tailBuffer: m(1) } } },
+    }));
+    expect(b.midBreaks.length).toBeGreaterThanOrEqual(3);
+    expect(b.warnings).toEqual([]);
+    expect(total(b)).toBeGreaterThanOrEqual(m(9));
+  });
+
+  it('does not add zero-length breaks', () => {
+    const b = buildBlock(make({ ads: { ...funnyBone, mid: { range: { min: 0, max: m(3) }, offers: { every: m(8), tailBuffer: m(1) } } } }));
+    expect(b.midBreaks.every((x) => x.length > 0)).toBe(true);
   });
 });
 

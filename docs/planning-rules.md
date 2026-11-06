@@ -22,8 +22,10 @@ Terms are defined in [`glossary.md`](glossary.md).
   (a slot fully generated for a day) holds its head, one or more blocks, and its tail. The planned
   slot is what is staged, locked and committed (see [`glossary.md`](glossary.md)).
 - A block ends at the first grid point at or after `start + content + bumpers + max(minimum ads,
-  required ads)`. Required ads are the minimums of every position that applies (pre, mid and post
-  for a program). A bumper's length is known once its clip is picked.
+  required ads)`. Required ads are the minimums of the fixed positions that apply (head, pre,
+  post, tail) plus the fewest mid breaks that let the positions reach the ratio minimum. **Mid
+  breaks are offers, not obligations**: the other offered breaks never make a block longer. A
+  bumper's length is known once its clip is picked.
 - The head is its bumper clips plus its ads (at least the range minimum, in multiples of the ad
   step). It does not have to be a grid multiple. The tail is reserved the same way (its minimum).
   Head and tail minimums belong to the planned slot and are reserved before blocks are picked.
@@ -65,9 +67,12 @@ Terms are defined in [`glossary.md`](glossary.md).
   has eligible ones: a break at the end of each eligible chapter (types `break` and `chapter` by
   default), never at the very end. A program with no eligible chapters gets an offer every N
   minutes instead. A tail buffer removes offers close to the end, for both sources.
-- **Choosing among offers**: use every offer if all the minimums fit the budget. Otherwise use the
-  largest number whose minimums fit, taking the subset whose gaps (including the start and the end)
-  are closest to equal. An optional minimum gap drops offers too close to the previous break or the
+- **Choosing among offers**: the budget is the room the block already has at its natural end on
+  the grid, within the ratio maximum. The fixed minimums (head, pre, post, tail) come first, and the
+  breaks take what is left: use every offer if their minimums fit, otherwise the largest number
+  whose minimums fit (never fewer than the ratio minimum forces). Large pre or post minimums
+  therefore mean fewer mid breaks. The subset taken is the one whose gaps (including the start and
+  the end) are closest to equal. An optional minimum gap drops offers too close to the previous break or the
   start.
 - Each position has a range (for example mid 2 to 3 minutes, post 0 to 5, tail 0 to 25). A
   minimum of 0 means the position may stay empty. Planned lengths are multiples of a step
@@ -105,9 +110,18 @@ Terms are defined in [`glossary.md`](glossary.md).
 - A **cursor adjustment** (rewind by k, or set to an episode) changes the position the next
   uncommitted airing reads, and the sequence continues from there. The wrap-around applies in both
   directions: rewinding from the first episode lands on the last.
-- **Slot linking**, as in Tunarr: several slots can share one cursor. In `continue` mode they
-  advance together, one episode each in turn. In `rerun` mode every linked slot plays the same
-  episode before the group moves on.
+- **Slot linking**: slots linked in `continue` mode share one cursor (the **head**) and advance it
+  together, one episode each in turn. A slot linked in `rerun` mode never moves the head: it replays
+  the episodes just behind it. It plays as many as fill its window, going back from the head one
+  episode at a time and then playing them oldest first (a window that holds 5 hour-long episodes
+  replays the 5 before the head). It only replays episodes that have aired. When fewer have aired
+  than the window holds, it plays those and the rest goes to interstitials, then dead air, with a
+  warning. This differs from Tunarr's `rerun`.
+- An **exception** replaces the slot that starts at its time and keeps that slot's window. If its
+  program does not fit the window, the window is planned as the slot normally would be, with a loud
+  warning.
+- **Anchored planning**: when planning must end exactly at an anchor that falls inside a slot's
+  window, that window is cut at the anchor and programs are picked to fit it.
 - Reruns are acceptable. Pools should be large enough that repeats are not noticeable.
 
 ## Windows

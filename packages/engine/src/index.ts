@@ -10,3 +10,5 @@ export * from './block.js';
 export * from './rng.js';
 export * from './pools.js';
 export * from './clips.js';
+export * from './schedule.js';
+export * from './plan.js';

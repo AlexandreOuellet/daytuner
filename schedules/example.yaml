@@ -42,5 +42,5 @@ exceptions:                      # special events; they win over the week for th
 
 week:                            # day 0 is Sunday
   sun:
-    - { at: "00:00", pool: office-hours }   # add `link: office, linkMode: continue|rerun` to share one cursor between slots
+    - { at: "00:00", pool: office-hours }   # add `link: office, linkMode: continue|rerun`: continue shares one head; rerun replays the episodes behind it
     - { at: "13:00", pool: comedy-movies-up-to-117 }

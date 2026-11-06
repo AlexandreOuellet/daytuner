@@ -52,9 +52,7 @@ export type BlockWarningCode =
   /** The positions cannot reach the ratio minimum, so the block holds the most they allow. */
   | 'ratio-min-unreachable'
   /** The required minimums are more than the ratio maximum allows. The minimums win. */
-  | 'minimums-exceed-ratio-max'
-  /** Fewer mid breaks than offered, because the ratio maximum does not pay for them all. */
-  | 'mid-breaks-reduced';
+  | 'minimums-exceed-ratio-max';
 
 export interface BlockWarning {
   code: BlockWarningCode;
@@ -131,33 +129,21 @@ export function buildBlock(input: BlockInput): Block {
   const fixed = content + bumperPre + bumperPost + bumperHead + bumperTail;
   const minAds = ceilToStep(content * ads.ratio.min, step);
   const capAds = floorToStep(content * ads.ratio.max, step);
-  const required = (breaks: number): Ms =>
-    headAds.min + pre.min + post.min + tailAds.min + breaks * midRange.min;
-  const reachable = (breaks: number): Ms =>
-    headAds.max + pre.max + post.max + tailAds.max + breaks * midRange.max;
+  const edgeMin = headAds.min + pre.min + post.min + tailAds.min;
+  const edgeMax = headAds.max + pre.max + post.max + tailAds.max;
+  const offered = offers.length;
 
-  // As many breaks as the ratio maximum pays for.
-  let breaks = offers.length;
-  while (breaks > 0 && required(breaks) > capAds) breaks--;
-  if (breaks < offers.length) {
-    warnings.push({
-      code: 'mid-breaks-reduced',
-      message: `${offers.length} mid breaks were offered but the ratio maximum pays for ${breaks}`,
-    });
-  }
-  if (required(breaks) > capAds) {
-    warnings.push({
-      code: 'minimums-exceed-ratio-max',
-      message: `the minimum ads (${required(breaks)} ms) are more than the ratio maximum allows (${capAds} ms)`,
-    });
-  }
-
-  let needed = Math.max(required(breaks), minAds);
-  if (needed > reachable(breaks)) {
-    needed = Math.max(required(breaks), reachable(breaks));
+  // The mid breaks the ratio minimum forces: the fewest that let the positions reach it. Every other
+  // offered break is optional, and a break is taken only if the room pays for it.
+  let forced = 0;
+  while (forced < offered && edgeMax + forced * midRange.max < minAds) forced++;
+  const reachable = edgeMax + forced * midRange.max;
+  let needed = Math.max(edgeMin + forced * midRange.min, minAds);
+  if (needed > reachable) {
+    needed = Math.max(edgeMin + forced * midRange.min, reachable);
     warnings.push({
       code: 'ratio-min-unreachable',
-      message: `the positions allow ${reachable(breaks)} ms of ads but the ratio minimum is ${minAds} ms`,
+      message: `the positions allow ${reachable} ms of ads but the ratio minimum is ${minAds} ms`,
     });
   }
 
@@ -169,7 +155,19 @@ export function buildBlock(input: BlockInput): Block {
     end = ceilToGrid(start + fixed + needed, grid, gridOrigin);
   }
   const room = end - start - fixed;
-  const budget = Math.max(Math.min(room, capAds), required(breaks));
+
+  // The budget is the room the block already has, within the ratio maximum. The optional breaks take
+  // what is left after every fixed minimum, so they never make the block longer.
+  let budget = Math.min(room, capAds);
+  let breaks = offered;
+  while (breaks > forced && edgeMin + breaks * midRange.min > budget) breaks--;
+  if (edgeMin + breaks * midRange.min > budget) {
+    budget = edgeMin + breaks * midRange.min;
+    warnings.push({
+      code: 'minimums-exceed-ratio-max',
+      message: `the minimum ads (${budget} ms) are more than the ratio maximum allows (${capAds} ms)`,
+    });
+  }
 
   const plan = planBreaks({
     step,
@@ -196,7 +194,7 @@ export function buildBlock(input: BlockInput): Block {
     adsPost: plan.edges.post ?? 0,
     adsTail: plan.edges.tail ?? 0,
     bumperTail,
-    midBreaks: chosen.map((at, i) => ({ at, length: plan.mid[i]! })),
+    midBreaks: chosen.map((at, i) => ({ at, length: plan.mid[i]! })).filter((b) => b.length > 0),
     gap: room - plan.used,
     warnings,
   };
