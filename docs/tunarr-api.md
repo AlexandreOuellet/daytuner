@@ -47,6 +47,27 @@ copy, on top of a lineup whose end carried a fraction of a millisecond. Checked 
 - An existing lineup whose end is fractional is handled by one flex (rounded to whole milliseconds)
   up to the next grid line. After it, everything written is whole milliseconds.
 
+## Guide and playback checks (test copy)
+
+- **XMLTV** (`POST /api/xmltv/refresh`, then `GET /api/xmltv.xml`): verified. All 19 programmes
+  from DayTuner's first append (from 08:00:00Z) start exactly on a 15-minute line, are contiguous with
+  no gap or overlap, and carry the right titles. Ads are folded into the programme they belong to.
+  The guide only covers `programmingHours` (72) ahead, so it cannot show a lineup written further out.
+  The media server's own guide (Jellyfin reading Tunarr's XMLTV) was not checked.
+- **`GET /stream/channels/{id}/item-stream.ts?t=`** does **not** play the item that started at `t`.
+  It streams whatever is on air at the wall-clock moment of the request and only logs a mismatch.
+  A future part of a lineup therefore cannot be played through it, and a request for one returns the
+  item airing now. (Earlier readings in this project that treated it otherwise were wrong.)
+- **Split programs.** A `content` item's `startOffsetMs` is the offset into the source media where
+  that piece begins. Tunarr's own test (`StreamProgramCalculator.test.ts`, "mid-roll break") covers
+  exactly this: 8 minutes at offset 0, a break, then 14 minutes at offset 8 minutes. The stock
+  scheduler writes `baseOffset + segmentStart`, the same shape DayTuner writes. Verified by reading
+  the code, not yet by watching a playback of a DayTuner-written region.
+- **Ad clips cannot be played from the `tunarr-stock-test` pod.** The "ads" source is local files under
+  `/ads`, which that pod does not mount (a Tunarr with that folder mounted does). Tunarr's log shows `Error opening input: No such file or directory`.
+- Playing a DayTuner-written region needs the wall clock to be inside it: a throwaway channel in the
+  test copy whose start is in the past, with the plan appended from its start.
+
 ## The read path (verified on the test copy)
 
 | What | Call | Notes |
@@ -81,7 +102,7 @@ only when `TUNARR_URL` is set, and the integration tests in the client package o
 
 ## Not verified yet
 
-- Real playback through ffmpeg and the media server for a manually written lineup.
+- Real playback of a lineup DayTuner wrote, watched while the wall clock is inside it (see above for what was checked in the code).
 - The XMLTV guide and the media server's guide after an append (caching was a problem before). Only
   Tunarr's own guide endpoint is checked, above.
 - How a very long lineup (several years) behaves.

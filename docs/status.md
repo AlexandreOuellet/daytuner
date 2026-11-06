@@ -23,8 +23,11 @@ tests that run only against a real Tunarr (`TUNARR_URL`).
 Nothing is pushed publicly until all of this is done (see the roadmap).
 
 **Phase 3, to finish**
-- [ ] Real playback through ffmpeg and the media server for a lineup DayTuner wrote
-- [ ] The XMLTV guide and the media server's guide after an append
+- [ ] Real playback of a lineup DayTuner wrote, watched while the wall clock is inside it. Needs a
+      throwaway channel in the test copy with its start in the past, and a pod that mounts `/ads` to
+      play the ad clips. The split-program offsets are confirmed from Tunarr's code and tests only
+- [x] Tunarr's XMLTV guide after an append: programme starts exactly on the grid, contiguous
+- [ ] The media server's guide (Jellyfin reading Tunarr's XMLTV) after an append
 - [ ] How a synthetic multi-year lineup behaves (memory, startup time, `now_playing`)
 
 **Phase 4: schedules and staging**
@@ -69,18 +72,14 @@ Each is one of: **build** (clear what to do), **verify** (find out), **know** (a
 
 - **build** Chapters are not loaded, so mid breaks use the every-N-minutes fallback. Tunarr only gives
   chapters per program, in `stream_details` (one call each); load them for the programs that get scheduled.
-- **build** Warnings name programs by id. They should use titles, which have to come from the library.
-- **build** An exception that matches no slot is ignored silently. It should warn.
-- **build** No `channel resync` to adopt Tunarr's current end after the worker refuses because the store
-  and Tunarr disagree, or the lineup ran out, or a pending commit matches neither end.
 - **build** A verified append that did not match leaves the commit pending, with no tool to inspect or close it.
 - **build** Adding a channel starts from a fresh state: an existing channel's place in its shows is not
   read from its history, so ordered shows begin at episode 1 unless adjusted with `cursor set`.
 - **build** The metrics are not stored over time, which the dashboard needs.
-- **verify** Playback, the XMLTV and media-server guides, and a multi-year lineup (phase 3, above).
+- **verify** Observed playback of a DayTuner-written region, the media server's guide, and a multi-year lineup (phase 3, above).
 - **know** A lineup whose end is fractional (older lineups) gets one rounded flex to the next grid
   line, so it stays up to half a millisecond off the grid from there on.
-- **know** A person must sort out any refusal by the worker until `channel resync` exists.
+- **know** `channel resync` adopts Tunarr's real end after a refusal, but then the planner state may not match what is in the lineup; a person has to check the shows' places.
 
 ### Engine choices the rules do not state
 
@@ -108,9 +107,10 @@ In this order:
 
 1. **Finish verifying phase 3.** Playback and guides, then a multi-year lineup. These need the media
    server, and the multi-year lineup adds tens of megabytes to the shared test pod, so agree first.
-2. **Close the small build gaps** that make the worker safe to leave running: `channel resync`, a
-   way to inspect or close a pending commit, warnings with titles, the unmatched-exception warning,
-   chapters, and reading an existing channel's place in its shows.
+2. **Close the remaining small build gaps** that make the worker safe to leave running: a way to
+   inspect a commit that was pending after a verified append did not match, chapters, and reading an
+   existing channel's place in its shows. (Done: `channel resync`, titles in warnings, the warning for
+   an exception that matches no slot.)
 3. **Settle the open decisions that shape phase 4** (ad overrides, overflow, the duplicate-title
    syntax, how it is run), then design phase 4 with the owner: revisions, staging, pins and locks.
 4. **Build phase 4**, then design and build phase 5, with the metrics history for the dashboard.
