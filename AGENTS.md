@@ -1,4 +1,4 @@
-# tunarr-programmer: notes for contributors and coding agents
+# DayTuner: notes for contributors and coding agents
 
 - Read `docs/vision.md` and `docs/planning-rules.md` first. The rules come from measurements.
 - `packages/engine` stays pure: no network, no database, no `Date.now()`. Inject the clock.

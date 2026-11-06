@@ -1,4 +1,4 @@
-# @tunarr-programmer/engine
+# @daytuner/engine
 
 Pure planning code: slot packing, the ad planner (water-filling split), pool picking
 (shuffled, ordered, fit-aware), and the grid and clock handling.

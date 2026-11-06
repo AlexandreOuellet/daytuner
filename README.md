@@ -1,6 +1,7 @@
-# tunarr-programmer
+# DayTuner
 
 A standalone scheduling application for [Tunarr](https://github.com/chrisbenincasa/tunarr).
+DayTuner is an independent project and is not affiliated with or endorsed by Tunarr.
 
 Tunarr stays what it is good at: it holds the media library, streams the channels, and stores
 each channel's lineup. **This project owns everything about deciding what plays and when**:
@@ -31,7 +32,7 @@ That means the scheduling brain can live outside Tunarr and write to it. See
                   |                                           ^
                   v                                           |
   +-----------------------------+   read library     +------------------+
-  |      tunarr-programmer      | <------------------ |      Tunarr      |
+  |           DayTuner          | <------------------ |      Tunarr      |
   |  engine . preview . worker  |   write lineup      |  library . lineup |
   |  state . web interface      | ------------------> |  streaming . EPG  |
   +-----------------------------+   (append / replace)+------------------+
@@ -47,6 +48,15 @@ That means the scheduling brain can live outside Tunarr and write to it. See
 | [`docs/planning-rules.md`](docs/planning-rules.md) | The scheduling rules the engine must implement |
 | [`docs/metrics.md`](docs/metrics.md) | The measurements used to judge a schedule |
 | [`docs/roadmap.md`](docs/roadmap.md) | Phases and open decisions |
+
+## Licence and credits
+
+Released under the [MIT licence](LICENSE).
+
+This project is an independent work and is not affiliated with Tunarr. It talks to
+[Tunarr](https://github.com/chrisbenincasa/tunarr) (copyright (c) 2020 Dan Ferguson, Victor Hugo
+Soliz Kuncar, zlib licence) only through its HTTP API. If code from Tunarr is ever copied into
+this repository, its notice must be kept, the file marked as altered, and the origin stated here.
 
 ## Layout
 

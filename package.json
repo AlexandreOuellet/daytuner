@@ -1,6 +1,7 @@
 {
-  "name": "tunarr-programmer",
+  "name": "daytuner",
   "private": true,
+  "license": "MIT",
   "version": "0.0.0",
   "description": "A standalone scheduling application for Tunarr.",
   "packageManager": "pnpm@10.0.0",
