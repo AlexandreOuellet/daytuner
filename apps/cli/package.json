@@ -3,5 +3,23 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "scripts": { "typecheck": "tsc --noEmit -p tsconfig.json", "test": "echo \"no tests yet\"" }
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run --passWithNoTests",
+    "daytuner": "tsx src/main.ts"
+  },
+  "dependencies": {
+    "@daytuner/engine": "workspace:^",
+    "@daytuner/schedule": "workspace:^",
+    "@daytuner/tunarr-client": "workspace:^"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.0"
+  },
+  "bin": {
+    "daytuner": "src/main.ts"
+  }
 }
