@@ -11,7 +11,9 @@
   "dependencies": {
     "@daytuner/engine": "workspace:^",
     "@daytuner/schedule": "workspace:^",
-    "@daytuner/tunarr-client": "workspace:^"
+    "@daytuner/store": "workspace:^",
+    "@daytuner/tunarr-client": "workspace:^",
+    "@daytuner/worker": "workspace:^"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",

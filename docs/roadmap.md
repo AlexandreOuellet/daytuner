@@ -24,8 +24,11 @@ Repository, documentation, the verified API facts, and the script that verified 
 - Run end to end on a test copy of Tunarr for one channel.
 
 ## Phase 3: state and worker
-- Per channel: next episode of ordered shows, seeds, end of the lineup written, commit log.
-- A top-up job that plans from the end of the lineup and appends.
+- Done: a SQLite store (`packages/store`) with, per channel, the planner state at the committed edge,
+  the edge, a copy of the schedule, the commit log and the cursor-adjustment log.
+- Done: a worker (`packages/worker`) that tops up to floor + one step, refuses to write when the store
+  and Tunarr disagree, and settles a commit left pending by a crash. The CLI has `channel`, `run`
+  and `cursor` commands for it.
 - Open the remaining unknowns from [`tunarr-api.md`](tunarr-api.md): playback and guide checks, and
   how a synthetic multi-year lineup behaves (memory, startup time, `now_playing`).
 
@@ -106,6 +109,10 @@ Repository, documentation, the verified API facts, and the script that verified 
   planning cuts the window that contains the anchor.
 - Mid breaks are offers, not obligations: they take only the room the block already has after the
   fixed minimums and never lengthen it, except the fewest the ratio minimum forces.
+- The worker keeps the committed end at least floor + one step ahead of now, and does nothing when it
+  already is. It refuses to write when Tunarr's end differs from the store's record. Phase 3 keeps
+  each channel's schedule as a stored copy of its YAML; phase 4 adds revisions to it. The store is
+  SQLite through Node's built-in `node:sqlite`.
 - Mid-break offers come from the program's chapters when it has eligible ones, otherwise from a
   fixed interval. The planner uses as many offers as the budget pays for, evenly spread.
 - Overflow and lateness exist as in Tunarr, per schedule and per slot, and default to 0 so the
@@ -126,19 +133,27 @@ Found while building and running phase 2. None is decided; each needs doing or a
   ambiguous title, so the channel file needs a way to name one (an id, or the year).
 - **Warnings name programs by id.** They should use titles; the engine only knows ids, so the titles
   have to come from the library.
-- **State is kept only with `--state FILE`.** The real store (cursors, bags, random state, commit
-  log) is phase 3.
-- **Playback and guides.** Playback through ffmpeg and the media server, and the XMLTV and media
-  server guides after an append, are not verified (phase 3). Only Tunarr's own guide endpoint is.
+- **Playback and guides, and a multi-year lineup.** Playback through ffmpeg and the media server, and the XMLTV and media
+  server guides after an append, are not verified, and neither is how a synthetic multi-year lineup
+  behaves (memory, startup, `now_playing`). All phase 3. Only Tunarr's own guide endpoint is checked.
 - **Overflow and lateness above 0** are rejected by the channel file reader; the engine does not
   support them yet.
 - **One ad block per channel.** No per-slot or per-pool override of ad settings (for example a
   longer mid-break interval for movies).
 - **An exception that matches no slot is ignored silently.** It should warn.
-- **Committed-but-not-aired episodes.** The engine is given the head already counting them; working
-  that out from the commit log is phase 3.
 - **A lineup whose end is fractional** (older lineups) gets one rounded flex to the next grid line,
   so it stays up to half a millisecond off the grid from there on. Acceptable, but worth knowing.
+
+- **No way to recover from a refusal.** When the worker stops because Tunarr's lineup differs from the
+  store's record, or the lineup has already run out, or a pending commit matches neither end, a person
+  has to sort it out. There is no `channel resync` command yet to adopt Tunarr's current end.
+- **A verified append that did not match** leaves the commit pending for inspection, with no tool to
+  look at it or close it.
+- **The worker is a one-shot command.** Running it daily is left to cron or a Kubernetes CronJob;
+  there is no scheduler inside DayTuner and no container image yet.
+- **Adding a channel starts from a fresh state.** An existing channel's current place in its shows
+  is not read from its history, so ordered shows begin at their first episode unless adjusted with
+  `cursor set`.
 
 ### Engine choices the rules do not state
 

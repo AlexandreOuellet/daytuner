@@ -141,8 +141,28 @@ current bag, so the shuffle does not serve it again soon (for example *The Night
 Christmas* in a kids movies pool). Defaults when the pick belongs to a pool in the schedule: an
 ordered pool is not counted, a shuffled pool is counted. Either can be overridden per exception.
 
+**State.** The store keeps, per channel, the planner's state as of the committed edge (cursors and
+rerun history, bags, random state), the edge itself, a copy of the schedule, and the commit log.
+Because committed is final, planning forward from that state is exactly the projection described
+under "Episode cursors". A cursor adjustment changes that state at the edge.
+
 **Worker** tops each channel up on a schedule (for example daily) following the commit rule above.
 It only appends. It never touches the past, the present or anything already committed.
+
+- **Top-up rule.** If the committed end is less than the floor plus one step (7 days + 24 hours by
+  default) ahead of now, the worker plans whole slots until it is. Run daily it adds about a day;
+  run twice a day, the second run finds nothing to do; after an outage one run catches up. The
+  lineup never grows without bound.
+- **It checks before it writes.** The store records where it believes the lineup ends. If Tunarr's
+  real end is different (the channel was saved from Tunarr's own interface, or its database was
+  restored), the worker refuses to append and reports it. It also refuses when the lineup has already
+  run out, because appending then would shift Tunarr's whole timeline.
+- **Crash safety.** Before appending, the worker records a pending commit with the end it expects.
+  After the append it reads Tunarr back and confirms it. If it crashed in between, the next run
+  compares Tunarr's real end with the pending record: equal to the new end means the append
+  happened and the record is completed; equal to the old end means it did not and the record is
+  dropped; anything else is reported and nothing is written.
+- The commit log records every commit: when, the span it covers, the items written and the slots.
 
 **CLI** (`apps/cli`) does the same planning on demand: `preview` prints the metrics for a
 schedule, `apply` commits it. It also imports and exports schedules as YAML.

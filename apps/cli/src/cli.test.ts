@@ -1,0 +1,134 @@
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { FakeTunarr } from '@daytuner/tunarr-client';
+import { runCli } from './cli.js';
+
+const DAY = 86_400_000;
+const MIN = 60_000;
+const NOW = Date.UTC(2026, 10, 6, 12, 0, 0);
+
+const YAML = `
+channel: Test
+timezone: America/Toronto
+grid: 15m
+ads:
+  step: 15s
+  ratio: { min: 15%, max: 60% }
+  mid:  { list: Ads, every: 8m, length: 2m-3m, tailBuffer: 1m }
+  post: { list: Ads, length: 0-5m }
+interstitial: { list: Fillers }
+pools:
+  sitcoms: { shows: [Show A] }
+  movies:  { movies: { genre: Comedy, duration: "<=117m" } }
+week:
+  sun: [ { at: "08:00", pool: sitcoms, link: a }, { at: "20:00", pool: movies } ]
+  mon: [ { at: "08:00", pool: sitcoms, link: a }, { at: "20:00", pool: movies } ]
+  tue: [ { at: "08:00", pool: sitcoms, link: a }, { at: "20:00", pool: movies } ]
+  wed: [ { at: "08:00", pool: sitcoms, link: a }, { at: "20:00", pool: movies } ]
+  thu: [ { at: "08:00", pool: sitcoms, link: a }, { at: "20:00", pool: movies } ]
+  fri: [ { at: "08:00", pool: sitcoms, link: a }, { at: "20:00", pool: movies } ]
+  sat: [ { at: "08:00", pool: sitcoms, link: a }, { at: "20:00", pool: movies } ]
+`;
+
+describe('the command line', () => {
+  let dir: string;
+  let fake: FakeTunarr;
+  let out: string[];
+  let errs: string[];
+  const run = (...args: string[]) =>
+    runCli([...args, '--tunarr', 'http://tunarr.test', '--db', join(dir, 'd.db')], {
+      clock: { now: () => NOW }, out: (l) => out.push(l), err: (l) => errs.push(l), env: {}, fetch: fake.fetch,
+    });
+  const said = () => out.join('\n');
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'daytuner-cli-'));
+    writeFileSync(join(dir, 'test.yaml'), YAML);
+    out = [];
+    errs = [];
+    const startTime = NOW - 10 * DAY;
+    fake = new FakeTunarr({
+      shows: [{ id: 'show-a', title: 'Show A', episodes: Array.from({ length: 300 }, (_, i) => ({ id: `ep${i + 1}`, title: `Ep ${i + 1}`, duration: 22 * MIN + 1000, season: 1 + Math.floor(i / 20), episode: (i % 20) + 1 })) }],
+      movies: Array.from({ length: 12 }, (_, i) => ({ id: `mov${i}`, title: `Movie ${i}`, duration: (85 + i * 2) * MIN, genres: ['Comedy'] })),
+      fillerLists: [
+        { id: 'fl-ads', name: 'Ads', clips: Array.from({ length: 40 }, (_, i) => ({ id: `ad${i}`, duration: 15_000 + (i % 7) * 1000 + i * 13 })) },
+        { id: 'fl-fill', name: 'Fillers', clips: Array.from({ length: 10 }, (_, i) => ({ id: `fl${i}`, duration: 180_000 + i * 1000 })) },
+      ],
+      channel: { id: 'chan-1', number: 1, name: 'Test', startTime },
+      lineup: [{ type: 'flex', duration: NOW + 3 * DAY - startTime }],
+    });
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it('adds a channel, shows it, and runs a dry run that writes nothing', async () => {
+    expect(await run('channel', 'add', join(dir, 'test.yaml'), '--seed', '5')).toBe(0);
+    expect(said()).toContain('Added channel "Test"');
+    expect(await run('channel', 'list')).toBe(0);
+    expect(said()).toContain('Test  (Tunarr chan-1)');
+    out.length = 0;
+    expect(await run('run', 'Test')).toBe(0);
+    expect(said()).toContain('Would append (dry run, nothing was written)');
+    expect(said()).toContain('Add --yes');
+    expect(fake.lineup).toHaveLength(1);
+    expect(fake.requests.some((r) => r.startsWith('POST /api/channels'))).toBe(false);
+  });
+
+  it('appends with --yes, then has nothing left to do', async () => {
+    await run('channel', 'add', join(dir, 'test.yaml'));
+    out.length = 0;
+    expect(await run('run', 'Test', '--yes')).toBe(0);
+    expect(said()).toMatch(/Appended: \d+ slots/);
+    expect(fake.lineup.length).toBeGreaterThan(500);
+    out.length = 0;
+    expect(await run('run', 'Test', '--yes')).toBe(0);
+    expect(said()).toContain('Nothing to do');
+    out.length = 0;
+    expect(await run('channel', 'status', 'Test')).toBe(0);
+    expect(said()).toContain('The store and Tunarr agree');
+    expect(said()).toMatch(/commit 1 done/);
+  });
+
+  it('rewinds a show after a missed week and says what it affects', async () => {
+    await run('channel', 'add', join(dir, 'test.yaml'));
+    await run('run', 'Test', '--yes');
+    out.length = 0;
+    expect(await run('cursor', 'Test', 'list')).toBe(0);
+    const before = /next episode (\d+) of 300/.exec(said());
+    expect(before).not.toBeNull();
+    out.length = 0;
+    expect(await run('cursor', 'Test', 'rewind', 'seq:a', '2')).toBe(0);
+    expect(said()).toContain(`was ${before![1]}, now ${Number(before![1]) - 2}`);
+    expect(said()).toContain('already in Tunarr stays as it is');
+    out.length = 0;
+    await run('channel', 'status', 'Test');
+    expect(said()).toContain('adjustment 1: seq:a rewind 2');
+  });
+
+  it('stops and writes nothing when the channel was changed outside DayTuner', async () => {
+    await run('channel', 'add', join(dir, 'test.yaml'));
+    fake.appendExternally([{ type: 'flex', duration: 5 * MIN }]);
+    const before = fake.lineup.length;
+    expect(await run('run', 'Test', '--yes')).toBe(3);
+    expect(errs.join('\n')).toContain('Stopped, nothing was written');
+    expect(fake.lineup).toHaveLength(before);
+    out.length = 0;
+    await run('channel', 'status', 'Test');
+    expect(said()).toContain('WARNING');
+  });
+
+  it('previews without a store', async () => {
+    expect(await run('preview', join(dir, 'test.yaml'), '--days', '2', '--from', '2026-11-09T00:00:00Z')).toBe(0);
+    expect(said()).toContain('grid accuracy');
+    expect(fake.lineup).toHaveLength(1); // a preview never writes
+  });
+
+  it('explains itself on a mistake', async () => {
+    expect(await run('nonsense')).toBe(2);
+    expect(errs.join('\n')).toContain('Usage:');
+    errs.length = 0;
+    expect(await run('run', 'Ghost')).toBe(3);
+    expect(errs.join('\n')).toContain('no channel named');
+  });
+});
