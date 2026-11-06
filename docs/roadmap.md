@@ -32,6 +32,7 @@ Repository, documentation, the verified API facts, and the script that verified 
 ## Phase 4: schedules and staging
 - Schedules stored in the SQLite store, with revisions and rollback. Saving a revision dry-runs it
   against the locked staged slots and lists the ones that would no longer fit.
+- Cursor adjustments (rewind, set) with the preview of which airing they change.
 - Staging: generate into staging, edit, preview the difference with what is committed, commit.
 - YAML import and export (see [`schedules/example.yaml`](../schedules/example.yaml)).
 
@@ -92,6 +93,9 @@ Repository, documentation, the verified API facts, and the script that verified 
 - One water level over the last block and the tail, so the slot ends exactly on the grid; time
   left after the budget is full (interstitials, then dead air) sits before the tail. Head and tail
   ads count toward the ads ratio (minimum and maximum), attributed to the first and last block.
+- Ordered shows can be adjusted by hand: rewind by k, or set to an episode (for a missed week). It
+  affects the first uncommitted airing onward and is logged. The interface shows which airing it
+  changes, since the committed floor means the next week is usually already final.
 - Mid-break offers come from the program's chapters when it has eligible ones, otherwise from a
   fixed interval. The planner uses as many offers as the budget pays for, evenly spread.
 - Overflow and lateness exist as in Tunarr, per schedule and per slot, and default to 0 so the

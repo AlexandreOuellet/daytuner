@@ -120,6 +120,16 @@ the cursor through committed slots that have not aired yet and through staged sl
 the sequence. If such a staged slot is removed or its episode replaced, that episode is back in
 line and plays next. Nothing is lost.
 
+**Cursor adjustments.** The owner can move an ordered show's place in its order, for example after
+missing a week. Two operations exist: **rewind by k** (the next planned episode becomes k episodes
+earlier: 1 repeats last week's episode, 2 covers two missed weeks) and **set to an episode** (also
+allows skipping ahead). After the adjusted airing the sequence continues normally from there, so a
+repeat happens once. An adjustment applies to the first uncommitted airing of that show onward, because
+committed lineups are final; staged slots of the show are regenerated unless locked. Each adjustment
+is recorded in the log. The interface and the preview must say exactly which airing it changes ("the
+22nd will play S2E3; the 15th is already committed"). With a floor of 7 days, the next week is usually
+already committed, so the floor can be lowered per channel to leave more room.
+
 **Explicit picks are off-cursor.** A slot or block that plays a specific program chosen by the user (for
 example the Doctor Who Halloween special) never reads or moves any cursor. The show's order is
 untouched, and the special airs in addition to the sequence. If the same program later comes up in

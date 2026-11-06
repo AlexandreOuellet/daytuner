@@ -96,6 +96,9 @@ Terms are defined in [`glossary.md`](glossary.md).
   an ordered show) is off-cursor: it does not read or move any cursor, so the show's order is
   unaffected. For a shuffled pool the pick counts against it by default (it is marked as drawn
   from the current bag, so it is not repeated soon). Either default can be overridden per exception.
+- A **cursor adjustment** (rewind by k, or set to an episode) changes the position the next
+  uncommitted airing reads, and the sequence continues from there. The wrap-around applies in both
+  directions: rewinding from the first episode lands on the last.
 - **Slot linking**, as in Tunarr: several slots can share one cursor. In `continue` mode they
   advance together, one episode each in turn. In `rerun` mode every linked slot plays the same
   episode before the group moves on.

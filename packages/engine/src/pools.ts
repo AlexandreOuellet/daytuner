@@ -87,3 +87,24 @@ export function advanceCursor(cursor: number, aired: number, length: number): nu
   if (!Number.isInteger(aired) || aired < 0) throw new RangeError(`aired must be a whole number from 0, got ${aired}`);
   return (cursor + aired) % length;
 }
+
+/** A manual move of an ordered show's place: rewind by k episodes, or set to a given episode. */
+export type CursorAdjustment = { kind: 'rewind'; by: number } | { kind: 'set'; index: number };
+
+/**
+ * The position after a manual adjustment. The list wraps in both directions, so rewinding from the
+ * first episode lands on the last one (a series that has looped has just aired its last episode).
+ */
+export function adjustPosition(position: number, adjustment: CursorAdjustment, length: number): number {
+  if (!Number.isInteger(length) || length <= 0) throw new RangeError(`length must be a positive integer, got ${length}`);
+  if (!Number.isInteger(position) || position < 0) throw new RangeError(`position must be a whole number from 0, got ${position}`);
+  if (adjustment.kind === 'set') {
+    if (!Number.isInteger(adjustment.index) || adjustment.index < 0 || adjustment.index >= length) {
+      throw new RangeError(`episode ${adjustment.index} is not in a list of ${length}`);
+    }
+    return adjustment.index;
+  }
+  if (!Number.isInteger(adjustment.by) || adjustment.by < 0) throw new RangeError(`rewind must be a whole number from 0, got ${adjustment.by}`);
+  const back = adjustment.by % length;
+  return (position - back + length) % length;
+}

@@ -25,6 +25,8 @@ word, this one wins.
   **shuffled** (a bag).
 - **Cursor**: an ordered pool's position. It advances only when a sequence episode has aired.
 - **Bag**: a shuffled pool's memory of what was drawn. Each program is drawn once before any repeats.
+- **Cursor adjustment**: moving an ordered pool's place in its order by hand: rewind by k, or set
+  to an episode. It changes the first uncommitted airing onward and never the past.
 - **Slot linking**: slots that share one cursor (`continue`), or all play the same episode (`rerun`).
 - **Exception**: a special event that overrides the schedule for a time, as a rule or by working on
   the day in staging.

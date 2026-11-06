@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { advanceCursor, emptyBag, markDrawn, orderedPick, pickFromBag, type BagState } from './pools.js';
+import { adjustPosition, advanceCursor, emptyBag, markDrawn, orderedPick, pickFromBag, type BagState } from './pools.js';
 import { nextFloat, nextInt, seedFrom, shuffle } from './rng.js';
 
 describe('rng', () => {
@@ -113,5 +113,32 @@ describe('an ordered pool', () => {
     expect(advanceCursor(1, 2, 3)).toBe(0);
     expect(advanceCursor(0, 7, 3)).toBe(1);
     expect(advanceCursor(5, 1, 0)).toBe(0);
+  });
+});
+
+describe('cursor adjustments', () => {
+  const n = 10;
+  it('rewinds by 1 to repeat the last episode, then continues normally', () => {
+    const next = adjustPosition(5, { kind: 'rewind', by: 1 }, n); // episode 5 was due, 4 repeats
+    expect(next).toBe(4);
+    expect([0, 1, 2].map((ahead) => orderedPick(Array.from({ length: n }, (_, i) => `e${i}`), next, ahead)!.index)).toEqual([4, 5, 6]);
+  });
+  it('rewinds by 2 for two missed weeks', () => {
+    expect(adjustPosition(5, { kind: 'rewind', by: 2 }, n)).toBe(3);
+  });
+  it('rewinds by 0 as no change and wraps in both directions', () => {
+    expect(adjustPosition(5, { kind: 'rewind', by: 0 }, n)).toBe(5);
+    expect(adjustPosition(0, { kind: 'rewind', by: 1 }, n)).toBe(9);
+    expect(adjustPosition(2, { kind: 'rewind', by: 25 }, n)).toBe(7);
+  });
+  it('sets to an episode, forward or back', () => {
+    expect(adjustPosition(5, { kind: 'set', index: 8 }, n)).toBe(8);
+    expect(adjustPosition(5, { kind: 'set', index: 0 }, n)).toBe(0);
+  });
+  it('rejects an episode outside the list and bad numbers', () => {
+    expect(() => adjustPosition(5, { kind: 'set', index: 10 }, n)).toThrow(RangeError);
+    expect(() => adjustPosition(5, { kind: 'set', index: -1 }, n)).toThrow(RangeError);
+    expect(() => adjustPosition(5, { kind: 'rewind', by: -1 }, n)).toThrow(RangeError);
+    expect(() => adjustPosition(5, { kind: 'rewind', by: 1 }, 0)).toThrow(RangeError);
   });
 });
