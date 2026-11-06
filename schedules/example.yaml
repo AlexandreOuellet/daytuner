@@ -12,13 +12,30 @@ ads:
   pre:  { length: 0 }
   fallback: true                 # one clip stretched over a gap the ads cannot fill
 
+overflow: 0                      # as in Tunarr; 0 keeps the grid exact. Per slot override allowed.
+lateness: 0                      # as in Tunarr; 0 keeps the grid exact. Per slot override allowed.
+
 pools:
   office-hours:
     shows: [The Office, Parks and Recreation, 30 Rock]
+    order: sequential            # never skips an episode; each slot has its own cursor
   comedy-movies-up-to-117:
     movies: { genre: Comedy, duration: "<=117m" }
+  kids-movies:
+    movies: { genre: Family, duration: "<=117m" }
+    order: shuffle               # a bag: each movie once before any repeats
+
+exceptions:                      # special events; they win over the week for the time they cover
+  - on: "10-31"                  # every 31 October; use a full date ("2026-10-31") for one year only
+    at: "20:00"
+    play: { show: Doctor Who, title: "Halloween Special" }   # an explicit pick: off-cursor,
+                                                             # the Doctor Who order is untouched
+  - on: "12-24"
+    at: "15:00"
+    play: { movie: The Nightmare Before Christmas }
+    counts: kids-movies          # counts against this shuffled pool (the default when the movie is in it)
 
 week:                            # day 0 is Sunday
   sun:
-    - { at: "00:00", pool: office-hours }
+    - { at: "00:00", pool: office-hours }   # add `link: office, linkMode: continue|rerun` to share one cursor between slots
     - { at: "13:00", pool: comedy-movies-up-to-117 }

@@ -9,15 +9,23 @@ where, when the next program starts, and which episode comes next. Tunarr plays 
 ## Principles
 
 1. **Tunarr streams, this project schedules.** No duplicated library, no second streamer.
-2. **The schedule is data.** One file per channel in git. A change is a pull request, and the pull
-   request shows what the change does to the channel before it goes live.
+2. **The schedule is data.** Each channel's schedule is stored in DayTuner, and every change is a
+   saved revision. The preview shows what a change does to the channel before it goes live, and a
+   revision can be rolled back. A schedule can be exported to and imported from YAML.
 3. **Never disturb a viewer.** What is playing, and what is about to play, is never rewritten.
-   Changes land in the future only.
+   Changes land in the future only, and once a slot is committed to Tunarr it is final: DayTuner
+   never edits or undoes it. Only staged slots, which are still in DayTuner, can change.
 4. **Measure, do not guess.** Every schedule is judged by the same numbers
    ([`metrics.md`](metrics.md)): grid accuracy, ad share, waits at the end of a slot, dead air.
 5. **The grid is a hard rule.** Programs start on the grid (for example every 15 minutes),
    exactly, for the whole lineup. Ad lengths flex to make that true.
 6. **Deterministic.** The same schedule, library and seed give the same lineup.
+
+## What Tunarr's own scheduling gets wrong for us
+
+- The interface is hard to follow, and the ad, bumper and filler features are hard to understand.
+- DayTuner should make both plain: one place to say what an ad break is, where bumpers go and how
+  long things run, and a preview that shows the result before anything is committed.
 
 ## Non-goals
 

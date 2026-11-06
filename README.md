@@ -28,7 +28,7 @@ That means the scheduling brain can live outside Tunarr and write to it. See
 ## How it fits
 
 ```
-          schedules/*.yaml (git)                       Jellyfin / players
+        schedules (SQLite, YAML export)                Jellyfin / players
                   |                                           ^
                   v                                           |
   +-----------------------------+   read library     +------------------+
@@ -43,6 +43,7 @@ That means the scheduling brain can live outside Tunarr and write to it. See
 | Document | What it covers |
 |---|---|
 | [`docs/vision.md`](docs/vision.md) | The goal, principles, non-goals, and how we will know it works |
+| [`docs/glossary.md`](docs/glossary.md) | What each word means: slot, planned slot, window, block, tiers, and so on |
 | [`docs/architecture.md`](docs/architecture.md) | Components, data flow, state, deployment |
 | [`docs/tunarr-api.md`](docs/tunarr-api.md) | What was verified against stock Tunarr, and what is still unknown |
 | [`docs/planning-rules.md`](docs/planning-rules.md) | The scheduling rules the engine must implement |
@@ -65,7 +66,7 @@ packages/engine         pure planning code: no network, no database
 packages/tunarr-client  typed client for the parts of Tunarr's API we use
 apps/cli                preview and apply from the command line
 apps/web                the interface (later)
-schedules/              one file per channel, versioned in git
+schedules/              example schedule in the YAML import/export format
 tools/spike             the script that verified the Tunarr API
 docs/                   the documents above
 ```

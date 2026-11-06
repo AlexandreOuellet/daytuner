@@ -1,6 +1,7 @@
 # Planning rules
 
 The rules the engine must implement. They come from running real schedules and measuring them.
+Terms are defined in [`glossary.md`](glossary.md).
 
 ## The grid
 
@@ -13,10 +14,12 @@ The rules the engine must implement. They come from running real schedules and m
 
 ## Blocks
 
-- A block is one program plus everything around it: head, pre, mid breaks, post, tail, bumpers.
-- Its length is the first grid point at or after `content + bumpers + max(minimum ads, required
-  ads)`. Required ads are the minimums of every position that applies (post and mid for a
-  program, head for the first of a window, tail for the last).
+- A block is one program plus what is around it: pre, mid breaks, post, bumpers. A **planned slot**
+  (a slot fully generated for a day) holds its head, one or more blocks, and its tail. The planned
+  slot is what is staged, locked and committed (see [`glossary.md`](glossary.md)).
+- A block's length is the first grid point at or after `content + bumpers + max(minimum ads,
+  required ads)`. Required ads are the minimums of every position that applies (pre, mid and post
+  for a program). Head and tail minimums belong to the planned slot and count toward its length.
 - **The ad ratio is a cap on ads inside the block, not a promise to fill it.** On a 15-minute
   grid a 22-minute show gets a 30-minute block; the 8 minutes of room are 36% of the show.
   Either ads fill it, or something else must.
@@ -44,8 +47,18 @@ The rules the engine must implement. They come from running real schedules and m
 
 - Shuffled pools are **fit-aware**: if the next pick does not fit the time left in the window,
   take a later one that does.
-- Ordered shows cannot skip. When the next episode does not fit, the window ends with unused
-  time. Option: skip and defer (play what fits, the skipped one next time).
+- Ordered shows never skip, as in Tunarr. Each slot has its own episode cursor. When the next
+  episode does not fit, the block is made longer (see Windows), or the window ends with unused
+  time. Skip and defer is not part of 1.0.
+- A cursor advances only when an episode produced by the sequence has aired, not when it is planned
+  or staged. An episode that is taken out of a staged slot plays next time.
+- An **explicit pick** (a specific program chosen for an exception, such as a Halloween special of
+  an ordered show) is off-cursor: it does not read or move any cursor, so the show's order is
+  unaffected. For a shuffled pool the pick counts against it by default (it is marked as drawn
+  from the current bag, so it is not repeated soon). Either default can be overridden per exception.
+- **Slot linking**, as in Tunarr: several slots can share one cursor. In `continue` mode they
+  advance together, one episode each in turn. In `rerun` mode every linked slot plays the same
+  episode before the group moves on.
 - Reruns are acceptable. Pools should be large enough that repeats are not noticeable.
 
 ## Windows
@@ -59,6 +72,42 @@ The rules the engine must implement. They come from running real schedules and m
 - Very different lengths belong in different slots. Specials of 30 to 70 minutes do not belong
   in movie slots.
 - A theme is chosen *after* grouping by length, and the evening slots are the best groups.
+
+## Overflow and lateness
+
+Both exist as in Tunarr and mean the same thing, but **the default is 0**, which keeps the hard
+grid above. They are settings for the whole schedule, with an override per slot.
+
+- **Max overflow**: how far a slot may run past its end to fit one more program (none, up to N
+  minutes, or one extra item).
+- **Max lateness**: how late the next slot may start after an overrun. Within the limit it starts
+  late. Otherwise it is skipped and flex fills the time until the slot after it.
+- A program is never cut off. Setting either above 0 gives up the grid guarantee, and the preview
+  must show the cost (grid accuracy under 100%).
+
+## Re-planning a range in staging
+
+- Planning only runs forward, because cursors, bags and carried rounding flow forward. A range is
+  planned from the end of the last committed slot (the only point where the state is certain)
+  through to the **rejoin point**: the first slot after the edited one that can be generated
+  normally. Only the end is an anchor: the last block must end exactly where the rejoin slot starts.
+- A **pin** fixes the program of one block and is a specific program, never a dynamic list. The rest
+  of the planned slot (other blocks, ads, bumpers, head, tail, padding) is regenerated around the
+  pins, inside the slot's window. A pin never changes the slot's length: if the pinned program does
+  not fit, the pin shows an error and the slot must be extended or shortened by a separate action.
+- A **lock** freezes a whole planned slot so it is not regenerated. Unlocked slots are regenerated
+  before commit, with their pins kept. If a locked slot no longer fits at commit time, its pins are
+  kept and the rest is regenerated, and a conflict is recorded.
+- Locked slots never change otherwise. The unlocked slots around them are re-planned, and may change
+  program, length and ads. Only the kept range is stored.
+- Extending a slot over the slots after it removes those it covers entirely and cuts back one it
+  covers partly. If that slot cannot accommodate the cut, a warning is shown and any time left
+  unfilled counts as dead air.
+- Extending or shortening a slot is a separate action. It re-plans the run to the rejoin point. A
+  neighbouring slot that loses time may get a shorter program or a shorter length.
+- Because generation is deterministic, everything the edit does not affect comes out identical.
+- If no gap-free plan exists with the locked slots, the result is reported with the gap shown. It
+  is never hidden, and it is not committed silently.
 
 ## Dead air and time
 
