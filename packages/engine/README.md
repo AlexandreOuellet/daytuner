@@ -22,7 +22,7 @@ Rules: [`docs/planning-rules.md`](../../docs/planning-rules.md). Terms: [`docs/g
 
 ## Not here yet
 
-Pins, locks and staging (phase 4), overflow and lateness above 0, and the metrics printout (phase 2).
+Pins, locks and staging (phase 4), and overflow and lateness above 0. Other open items: "Known gaps" in [`docs/roadmap.md`](../../docs/roadmap.md).
 
 ```
 pnpm --filter @daytuner/engine test

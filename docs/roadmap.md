@@ -114,3 +114,54 @@ Repository, documentation, the verified API facts, and the script that verified 
 ## Open decisions
 - **Ad and bumper interface.** The model is decided (see "Decided"). Still open: how the web
   interface shows the positions plainly.
+
+## Known gaps
+
+Found while building and running phase 2. None is decided; each needs doing or a decision before 1.0.
+
+- **Chapters are not loaded.** Mid breaks use the every-N-minutes fallback for every program,
+  because Tunarr only gives chapters per program, in `stream_details` (one call each). Load them for
+  the programs that get scheduled.
+- **Duplicate show titles.** The test library has two shows called "Scrubs". The resolver refuses an
+  ambiguous title, so the channel file needs a way to name one (an id, or the year).
+- **Warnings name programs by id.** They should use titles; the engine only knows ids, so the titles
+  have to come from the library.
+- **State is kept only with `--state FILE`.** The real store (cursors, bags, random state, commit
+  log) is phase 3.
+- **Playback and guides.** Playback through ffmpeg and the media server, and the XMLTV and media
+  server guides after an append, are not verified (phase 3). Only Tunarr's own guide endpoint is.
+- **Overflow and lateness above 0** are rejected by the channel file reader; the engine does not
+  support them yet.
+- **One ad block per channel.** No per-slot or per-pool override of ad settings (for example a
+  longer mid-break interval for movies).
+- **An exception that matches no slot is ignored silently.** It should warn.
+- **Committed-but-not-aired episodes.** The engine is given the head already counting them; working
+  that out from the commit log is phase 3.
+- **A lineup whose end is fractional** (older lineups) gets one rounded flex to the next grid line,
+  so it stays up to half a millisecond off the grid from there on. Acceptable, but worth knowing.
+
+### Engine choices the rules do not state
+
+Made while building phase 1. They are in the code and tested, but nobody has confirmed them.
+
+- **Exception that does not fit.** The owner chose "a warning and dead air". The engine instead plans
+  the slot as it normally would and raises an alert, because a whole window of dead air seemed worse.
+  Confirm or change.
+- **Mid-break offers need refinement later** (the owner's words). In particular the default eligible
+  chapter types (`break` and `chapter`, copied from Tunarr), the optional minimum gap, and how the
+  breaks are spread (equal gaps, ties to the earlier offer).
+- **A shuffled pool repeats when nothing left fits.** If nothing remaining in the bag fits the time
+  left, a program already drawn this round that does fit is repeated (flagged), instead of leaving
+  the time empty. With nothing fitting at all, there is no pick.
+- **Rerun history after a manual adjustment.** A rewind by k removes k episodes of history. Setting
+  the head backward removes the episodes between; setting it forward keeps the history unchanged, so
+  the skipped episodes count as aired. Rewinding from the first episode wraps to the last.
+- **Bumpers can cost a whole grid step.** A 26-minute show fits a 30-minute block, but with 20 s
+  bumpers on each side it goes to 45 minutes, because the ratio minimum already nearly fills 30. It
+  follows the rules as written, and is expensive on a sparse grid.
+- **Best-fit clip search looks at the next 8 clips of the bag.** A tuning choice (it was 12; 8 kept
+  planning fast). A larger window finds slightly better fits.
+- **Starting inside a slot.** If planning starts partway through a slot's window, only the rest of
+  that window is planned, with an info warning. This happens when the end of a lineup is not on a slot
+  boundary.
+
