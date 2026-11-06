@@ -1,5 +1,6 @@
-# DRAFT format: this is what a channel file is meant to look like. Nothing reads it yet.
+# A channel file. Read by @daytuner/schedule (packages/schedule), which a test runs on this very file.
 channel: the-funny-bone          # matches the channel in Tunarr
+timezone: America/Toronto        # the schedule's own clock, with its daylight-saving rules
 grid: 15m                        # slots start and end on a multiple of this, exactly (so do blocks, except next to a head or tail)
 ads:                             # each position names its own filler list in Tunarr
   step: 15s                      # planned lengths are multiples of this

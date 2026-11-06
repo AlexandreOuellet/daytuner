@@ -98,6 +98,8 @@ Repository, documentation, the verified API facts, and the script that verified 
   changes, since the committed floor means the next week is usually already final.
 - Clips are drawn from a bag per list with a best-fit effort. A break's shortfall is carried to the
   next break, and the last one goes to interstitials, then dead air.
+- An ordered pool of several shows takes turns, one episode of each in turn; a show that runs out
+  drops out.
 - Slot linking: `continue` shares one head. `rerun` never moves the head and replays the episodes
   just behind it, as many as fill its window, oldest first, and only ones that have aired.
 - An exception replaces the slot starting at its time and keeps that slot's window. Anchored

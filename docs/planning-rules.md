@@ -96,6 +96,9 @@ Terms are defined in [`glossary.md`](glossary.md).
 
 ## Picking programs
 
+- An ordered pool of several shows takes turns: one episode of each show in turn (every show's
+  first episode, then every show's second, and so on). A show that runs out drops out of the
+  rotation. Within a show the order is by season, then episode.
 - Shuffled pools are **fit-aware**: if the next pick does not fit the time left in the window,
   take a later one that does.
 - Ordered shows never skip, as in Tunarr. Each slot has its own episode cursor. When the next
