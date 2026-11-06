@@ -6,6 +6,8 @@ describe('units', () => {
     expect(parseDuration('15m')).toBe(900_000);
     expect(parseDuration('30s')).toBe(30_000);
     expect(parseDuration('1h30m')).toBe(5_400_000);
+    expect(parseDuration('7d')).toBe(604_800_000);
+    expect(parseDuration('1d12h')).toBe(129_600_000);
     expect(parseDuration('0')).toBe(0);
     for (const bad of ['', '15', 'abc', '1.5m', '-5m']) expect(() => parseDuration(bad)).toThrow(/not a duration/);
   });

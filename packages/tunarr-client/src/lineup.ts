@@ -82,3 +82,63 @@ export function alignToGrid(edge: number, grid: number): Alignment {
   const flex = Math.round(from - edge);
   return { from, flex };
 }
+
+export interface AppendReport {
+  ok: boolean;
+  itemsBefore: number;
+  itemsAfter: number;
+  /** Where the channel's lineup ended before and after (start time plus duration). */
+  edgeBefore: number;
+  edgeAfter: number;
+  /** What differed, if anything. */
+  problems: string[];
+}
+
+interface Appender {
+  channel(id: string): Promise<{ startTime: number; duration: number }>;
+  lineup(id: string): Promise<Record<string, unknown>[]>;
+  appendLineup(id: string, lineup: readonly unknown[]): Promise<void>;
+}
+
+/**
+ * Appends items and then reads the lineup back, checking that Tunarr stored exactly what was sent:
+ * the same number of items, in the same order, with the same ids, types and durations, and that the
+ * channel grew by exactly their total.
+ */
+export async function appendVerified(client: Appender, channelId: string, items: readonly LineupItem[]): Promise<AppendReport> {
+  const before = await client.channel(channelId);
+  const itemsBefore = (await client.lineup(channelId)).length;
+  await client.appendLineup(channelId, items);
+  const after = await client.channel(channelId);
+  const stored = (await client.lineup(channelId)).slice(itemsBefore);
+
+  const problems: string[] = [];
+  if (stored.length !== items.length) problems.push(`Tunarr stored ${stored.length} new items but ${items.length} were sent`);
+  const n = Math.min(stored.length, items.length);
+  for (let i = 0; i < n; i++) {
+    const s = stored[i]!;
+    const sent = items[i]!;
+    const same =
+      s['type'] === sent.type &&
+      Math.round(Number(s['duration'])) === sent.duration &&
+      (sent.type === 'flex' || s['id'] === sent.id) &&
+      (sent.type !== 'content' || Number(s['startOffsetMs'] ?? 0) === sent.startOffsetMs) &&
+      (sent.type !== 'filler' || (s['fillerListId'] === sent.fillerListId && s['fillerType'] === sent.fillerType));
+    if (!same) {
+      problems.push(`item ${i} differs from what was sent`);
+      if (problems.length >= 5) break;
+    }
+  }
+  const grew = Math.round(after.duration) - Math.round(before.duration);
+  if (Math.abs(grew - totalDuration(items)) > 1) problems.push(`the channel grew by ${grew} ms but ${totalDuration(items)} ms were sent`);
+  if (after.startTime !== before.startTime) problems.push('the channel start time changed');
+
+  return {
+    ok: problems.length === 0,
+    itemsBefore,
+    itemsAfter: itemsBefore + stored.length,
+    edgeBefore: before.startTime + before.duration,
+    edgeAfter: after.startTime + after.duration,
+    problems,
+  };
+}

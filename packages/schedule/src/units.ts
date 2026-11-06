@@ -2,15 +2,15 @@
 // Every parser returns whole milliseconds (or a plain fraction for a percentage) or throws a
 // message that says what was wrong.
 
-const UNIT_MS: Record<string, number> = { h: 3_600_000, m: 60_000, s: 1_000 };
+const UNIT_MS: Record<string, number> = { d: 86_400_000, h: 3_600_000, m: 60_000, s: 1_000 };
 
-/** "15m", "30s", "1h", "1h30m", or "0". */
+/** "7d", "15m", "30s", "1h", "1h30m", or "0". */
 export function parseDuration(text: string): number {
   const t = text.trim();
   if (t === '0') return 0;
-  const m = /^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/.exec(t);
-  if (!m || t === '') throw new Error(`"${text}" is not a duration (use 15m, 30s, 1h30m)`);
-  return Number(m[1] ?? 0) * UNIT_MS['h']! + Number(m[2] ?? 0) * UNIT_MS['m']! + Number(m[3] ?? 0) * UNIT_MS['s']!;
+  const m = /^(?:(\d+)d)?(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/.exec(t);
+  if (!m || t === '') throw new Error(`"${text}" is not a duration (use 7d, 15m, 30s, 1h30m)`);
+  return Number(m[1] ?? 0) * UNIT_MS['d']! + Number(m[2] ?? 0) * UNIT_MS['h']! + Number(m[3] ?? 0) * UNIT_MS['m']! + Number(m[4] ?? 0) * UNIT_MS['s']!;
 }
 
 export interface MsRange {

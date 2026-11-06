@@ -3,3 +3,4 @@
 export const TUNARR_CLIENT_VERSION = '0.0.0';
 export * from './client.js';
 export * from './lineup.js';
+export * from './fake.js';
