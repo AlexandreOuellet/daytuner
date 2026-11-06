@@ -51,9 +51,15 @@ Terms are defined in [`glossary.md`](glossary.md).
 
 ## Ad positions
 
-- Mid-break positions are *offers*: a break every N minutes of **content time** (ads and bumpers
-  do not count), with a tail buffer so none lands right before the end. The planner uses as many
-  as the budget allows, spread evenly.
+- Mid-break positions are *offers*, and the planner chooses which offers become breaks. Times are
+  **content time** (ads and bumpers do not count). Offers come from the program's chapters when it
+  has eligible ones: a break at the end of each eligible chapter (types `break` and `chapter` by
+  default), never at the very end. A program with no eligible chapters gets an offer every N
+  minutes instead. A tail buffer removes offers close to the end, for both sources.
+- **Choosing among offers**: use every offer if all the minimums fit the budget. Otherwise use the
+  largest number whose minimums fit, taking the subset whose gaps (including the start and the end)
+  are closest to equal. An optional minimum gap drops offers too close to the previous break or the
+  start.
 - Each position has a range (for example mid 2 to 3 minutes, post 0 to 5, tail 0 to 25). A
   minimum of 0 means the position may stay empty. Planned lengths are multiples of a step
   (15 seconds), because ad clips are about 15 to 30 seconds.

@@ -89,6 +89,8 @@ Repository, documentation, the verified API facts, and the script that verified 
   what is left to the window's end. Head and tail minimums are reserved before blocks are picked.
   If things do not fit: pick another program and warn; warn for a sequential episode; if nothing
   fits at commit time, interstitials then dead air, with a loud warning.
+- Mid-break offers come from the program's chapters when it has eligible ones, otherwise from a
+  fixed interval. The planner uses as many offers as the budget pays for, evenly spread.
 - Overflow and lateness exist as in Tunarr, per schedule and per slot, and default to 0 so the
   grid stays exact.
 

@@ -4,7 +4,7 @@ grid: 15m                        # slots start and blocks end on a multiple of t
 ads:                             # each position names its own filler list in Tunarr
   step: 15s                      # planned lengths are multiples of this
   ratio: { min: 15%, max: 60% }  # ads as a share of the show, inside its block (bumpers not counted)
-  mid:  { list: Old Ads, every: 8m, length: 2m-3m, tailBuffer: 1m }
+  mid:  { list: Old Ads, every: 8m, length: 2m-3m, tailBuffer: 1m }   # `every` is used when a program has no chapters
   post: { list: Old Ads, length: 0-5m }
   tail: { list: Old Ads, length: 0-25m }
   head: { length: 0 }
