@@ -6,3 +6,4 @@ export * from './time.js';
 export * from './clock.js';
 export * from './breaks.js';
 export * from './offers.js';
+export * from './block.js';

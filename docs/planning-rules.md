@@ -5,14 +5,15 @@ Terms are defined in [`glossary.md`](glossary.md).
 
 ## The grid
 
-- Every planned slot starts on the grid (for example every 15 minutes), exactly, and every block
-  ends on it. A block starts on it too, except the first block of a slot that has a head (head
-  bumper and head ads): it starts when the head ends, and still ends on the grid. The grid rule is
+- A planned slot starts and ends on the grid (for example every 15 minutes), exactly. So do the
+  blocks, except at the two edges: the first block of a slot that has a head (head bumper and head
+  ads) starts when the head ends, and the last block of a slot that has a tail ends where the tail
+  starts. Either can be off the grid. Every other block start and end is on it. The grid rule is
   about the block (the program plus its pre, mid and post ads and bumpers), not the bare program.
 - Every duration written to the lineup is a whole number of milliseconds, and the rounding error
   is carried into the next item. Without this, a few milliseconds a block added up to minutes
   over a year, and 93% of blocks ended up more than 10 seconds off the grid.
-- A block ends exactly where a window ends. No tolerance, no overflow, no lateness: a late window
+- A slot ends exactly where its window ends. No tolerance, no overflow, no lateness: a late window
   was shown to push the delay into the next window, again and again.
 
 ## Blocks
@@ -24,14 +25,22 @@ Terms are defined in [`glossary.md`](glossary.md).
   required ads)`. Required ads are the minimums of every position that applies (pre, mid and post
   for a program). A bumper's length is known once its clip is picked.
 - The head is its bumper clips plus its ads (at least the range minimum, in multiples of the ad
-  step). It does not have to be a grid multiple. The tail is reserved the same way (its minimum) and
-  then takes whatever is left to the window's end. Head and tail minimums belong to the planned slot
-  and are reserved before blocks are picked.
+  step). It does not have to be a grid multiple. The tail is reserved the same way (its minimum).
+  Head and tail minimums belong to the planned slot and are reserved before blocks are picked.
+- **One water level, tails included.** The last block and the tail are planned together and end
+  exactly where the slot ends: head, pre, mid, post and tail rise together (see Ad positions). When
+  the ad budget is full and time remains, that time (interstitials, then dead air) sits between the
+  last block and the tail, so the tail stays at the slot's end. A slot with no tail has the same gap
+  at its end, before the next slot.
 - **Not enough room.** If the blocks plus the head and tail minimums do not fit the window, pick
   another program that does fit and warn (for example "20 episodes won't fit this slot", "20 movies
   won't fit this slot"). A sequential episode that cannot fit also warns (it is never skipped, see
   Picking programs). If nothing fits and the slot must be committed, the gap is filled by
   interstitials, then dead air, with a loud warning when scheduling and planning.
+- **Head and tail ads count toward the ratio**, both its minimum and its maximum, attributed to
+  the first block (head) and the last block (tail) of the planned slot. A one-block slot counts all
+  five positions. Bumpers never count. The price is that the first and last blocks of a multi-block
+  slot hold fewer ads in their breaks than the blocks between.
 - **The ad ratio is a cap on ads inside the block, not a promise to fill it.** On a 15-minute
   grid a 22-minute show gets a 30-minute block; the 8 minutes of room are 36% of the show.
   Either ads fill it, or something else must.
@@ -44,7 +53,7 @@ Terms are defined in [`glossary.md`](glossary.md).
   post. A slot starts head bumper, head ads, pre ads, pre bumper, program. A program ends with post
   bumper, post ads, then tail ads and tail bumper at the end of the slot.
 - **Bumpers do not count toward the ads ratio**, but they do add to the block's length, which is how
-  the block still ends on the grid (see Blocks).
+  the block still ends on the grid (see Blocks), except before a tail.
 - Leftover time that nothing fits is filled by **interstitials**: one or several clips from an
   optional list (music videos, PSAs and the like), chosen to fit. What they cannot fill is dead air.
   With no interstitial list configured it is all dead air.

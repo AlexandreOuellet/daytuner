@@ -17,7 +17,7 @@ maximum. Minutes only matter at the places where a viewer waits; inside a show u
 
 ## Whole lineup
 
-- **Grid accuracy**: share of slot starts and block ends (and block starts, other than a first block after a head) within 1 second of a grid line, and the worst miss.
+- **Grid accuracy**: share of slot starts and ends, and of block starts and ends (other than the edges next to a head or a tail), within 1 second of a grid line, and the worst miss.
   Target: 100%, worst under a second.
 - **Ad time** as a share of air time, and how it splits between mid, post and tail.
 - **Dead air** as a share of air time, and as gaps per day by size.

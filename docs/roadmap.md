@@ -82,13 +82,16 @@ Repository, documentation, the verified API facts, and the script that verified 
   **interstitial** clips (Tunarr's `fallback`; music videos, PSAs and the like, one or several) fill
   a gap nothing else fills; what is left is dead air.
 - Grid: the rule is about the block (the program plus its pre, mid and post ads and bumpers), not
-  the bare program. A planned slot starts on the grid and every block ends on it. A block starts on
-  it too, except the first block of a slot with a head (head bumper and ads), which starts when the
-  head ends.
+  the bare program. A planned slot starts and ends on the grid. So does every block, except the
+  first block of a slot with a head (it starts when the head ends) and the last block of a slot
+  with a tail (it ends where the tail starts).
   The head does not have to be a grid multiple; its ads come in ad-step multiples. The tail takes
   what is left to the window's end. Head and tail minimums are reserved before blocks are picked.
   If things do not fit: pick another program and warn; warn for a sequential episode; if nothing
   fits at commit time, interstitials then dead air, with a loud warning.
+- One water level over the last block and the tail, so the slot ends exactly on the grid; time
+  left after the budget is full (interstitials, then dead air) sits before the tail. Head and tail
+  ads count toward the ads ratio (minimum and maximum), attributed to the first and last block.
 - Mid-break offers come from the program's chapters when it has eligible ones, otherwise from a
   fixed interval. The planner uses as many offers as the budget pays for, evenly spread.
 - Overflow and lateness exist as in Tunarr, per schedule and per slot, and default to 0 so the

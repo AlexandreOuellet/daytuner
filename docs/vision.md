@@ -17,8 +17,8 @@ where, when the next program starts, and which episode comes next. Tunarr plays 
    never edits or undoes it. Only staged slots, which are still in DayTuner, can change.
 4. **Measure, do not guess.** Every schedule is judged by the same numbers
    ([`metrics.md`](metrics.md)): grid accuracy, ad share, waits at the end of a slot, dead air.
-5. **The grid is a hard rule.** Slots start and blocks end on the grid (for example every
-   15 minutes), exactly, for the whole lineup. Ad lengths flex to make that true.
+5. **The grid is a hard rule.** Slots start and end on the grid (for example every
+   15 minutes), exactly, for the whole lineup, and so do blocks except next to a head or a tail. Ad lengths flex to make that true.
 6. **Deterministic.** The same schedule, library and seed give the same lineup.
 
 ## What Tunarr's own scheduling gets wrong for us
