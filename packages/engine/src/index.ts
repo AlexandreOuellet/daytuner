@@ -7,3 +7,5 @@ export * from './clock.js';
 export * from './breaks.js';
 export * from './offers.js';
 export * from './block.js';
+export * from './rng.js';
+export * from './pools.js';
