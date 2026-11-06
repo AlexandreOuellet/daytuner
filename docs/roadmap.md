@@ -77,4 +77,10 @@ Repository, documentation, the verified API facts, and the script that verified 
   grid stays exact.
 
 ## Open decisions
-None at the moment.
+- **The ad, bumper and filler model (next).** What a break is, where ads and bumpers go, how long
+  they run, and what the user sets. Tunarr's ad, bumper and filler features are hard to understand,
+  and that is the main complaint this project answers. The draft in `schedules/example.yaml` keeps
+  Tunarr's positions (head, pre, mid, post, tail, fallback) and has not been questioned yet. The
+  planner depends on it, so settle it before writing the engine.
+- Two details to work out when the planner is written: whether the planned slot or the program starts
+  on the grid when head ads are used, and how head and tail minimums add to a planned slot's length.
