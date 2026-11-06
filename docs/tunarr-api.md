@@ -33,6 +33,30 @@ Item types: `content` (with `startOffsetMs`, which is how a program is split at 
 Ad clips and bumpers are ordinary `filler` items pointing at a clip (a program id) in a filler
 list, with that clip's duration. Choosing the clips is the engine's job ("eager" scheduling).
 
+## The read path (verified on the test copy)
+
+| What | Call | Notes |
+|---|---|---|
+| Channels | `GET /api/channels` | `duration` is fractional, so round it |
+| Stored lineup | `GET /api/channels/{id}/programming` | `lineup` holds the items as written |
+| Filler lists | `GET /api/filler-lists`, then `GET /api/filler-lists/{id}/programs` | one entry per clip; its `duration` is fractional (for example `135732.245`) |
+| Movies, shows | `POST /api/programs/search` with a `type` filter, `page` and `limit` | movies carry `duration` and `genres`; results are paged (`totalPages`) |
+| Episodes of a show | `GET /api/programs/{showId}/descendants` | each has `season.index` and `episodeNumber`; sort by those for the viewing order |
+| Chapters | `GET /api/programs/{id}/stream_details` | not on the other program endpoints, so one call per program |
+
+Item shapes in a stored lineup: `content` has `id`, `startOffsetMs` and `duration` (the length of
+that piece); `filler` has `id` (the clip), `fillerListId`, `fillerType` and `duration`; `flex` has
+`duration`. Library and clip durations are fractional, so DayTuner rounds each once, when it reads
+them, and plans in whole milliseconds from there.
+
+## The test copy
+
+Never write to the Tunarr that people watch.
+Writes go to a stock Tunarr running on a copy of the data: the temporary `tunarr-stock-test` pod in
+the `tunarr-test` namespace, reached with `kubectl -n tunarr-test port-forward pod/tunarr-stock-test
+18000:8000`. Its channel "Test Channel" is the one to write to. Client tests that need a server run
+only when `TUNARR_URL` is set, and the integration tests in the client package only read.
+
 ## Do not do
 
 - **Do not change a channel's `startTime`** (`PUT /api/channels/{id}`). It is stored to the whole
