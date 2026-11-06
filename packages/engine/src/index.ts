@@ -9,3 +9,4 @@ export * from './offers.js';
 export * from './block.js';
 export * from './rng.js';
 export * from './pools.js';
+export * from './clips.js';

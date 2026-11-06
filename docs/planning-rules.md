@@ -80,6 +80,12 @@ Terms are defined in [`glossary.md`](glossary.md).
   from 59% to 69% of the ad time and cut blocks with most ads after the show from 50% to 8%.
 - The last block of a window may run to the window's end only if its ads stay within the ratio
   ceiling and each position's maximum. Otherwise the rest is interstitial or dead air.
+- **Choosing clips.** A planned length is filled with whole clips, never over it. Each list is a
+  bag: every clip plays once before any repeats, remembered across breaks and days. For each break
+  the planner looks at the next clips of the bag and takes the combination that leaves the least
+  unfilled (a best-fit effort), earlier clips winning ties. What a break cannot fill is added to the
+  room of the next break; what the last break cannot fill goes to interstitials, then dead air. A
+  bumper is one clip drawn from its list's bag.
 - The last 10 to 15 seconds of a break often cannot be filled: the clip list has almost no short
   clips. Interstitial clips, or more short ads, close it.
 
