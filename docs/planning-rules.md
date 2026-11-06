@@ -139,3 +139,6 @@ grid above. They are settings for the whole schedule, with an override per slot.
 - Dead air at the end of a block counts as advertising when judging a schedule.
 - Daylight saving and the schedule's clock are owned by this project, tested explicitly,
   and the day of a change is excluded from the metrics.
+- A local time that happens twice (clocks go back) means the first occurrence. A local time that
+  never happens (clocks go forward) moves ahead by the length of the gap, so 02:30 on the spring day
+  is 03:30. Nothing is skipped or repeated. A change day is 23 or 25 hours long.

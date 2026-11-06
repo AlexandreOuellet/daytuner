@@ -11,8 +11,10 @@ Tunarr, including playback and the guide check.
 Repository, documentation, the verified API facts, and the script that verified them.
 
 ## Phase 1: the engine
-- Move the planning code (ad planner, water-filling, packing, fit-aware picking, grid and clock
-  handling) into `packages/engine`, with its tests.
+- Write the planning code in `packages/engine`, with its tests, from the rules in
+  [`planning-rules.md`](planning-rules.md): ad planner, water-filling, packing, fit-aware picking,
+  grid and clock handling. There is no earlier implementation to port; the rules came from
+  measurements of earlier runs.
 - A pure `plan(schedule, library, state, window)` that returns lineup items and new state.
 - Golden tests: the same schedule and seed always give the same lineup.
 
