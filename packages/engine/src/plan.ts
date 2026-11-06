@@ -80,6 +80,7 @@ export function plan(input: PlanInput): PlanResult {
   for (const w of windowsFor(schedule, input.from, input.to, input.exact === true, work)) {
     slots.push(planWindow(ctx, work, w));
   }
+  warnAboutUnmatchedExceptions(schedule, input.from, input.to, work);
   return { slots, state: { rng: work.rng, sequences: work.sequences, bags: work.bags }, warnings: work.warnings };
 }
 
@@ -166,6 +167,31 @@ function windowsFor(schedule: Schedule, from: Ms, to: Ms, exact: boolean, work: 
     out.push({ start, end, slot: s.slot, slotId, ...(exception ? { exception } : {}) });
   }
   return out;
+}
+
+/**
+ * An exception replaces the slot that starts at its time. One that falls inside the planned range
+ * but has no slot starting then would otherwise do nothing, silently.
+ */
+function warnAboutUnmatchedExceptions(schedule: Schedule, from: Ms, to: Ms, work: Work): void {
+  if (schedule.exceptions.length === 0 || to <= from) return;
+  const first = toLocal(schedule.zone, from).year;
+  const last = toLocal(schedule.zone, to).year;
+  for (const e of schedule.exceptions) {
+    const hour = Math.floor(e.at / HOUR);
+    const minute = Math.floor((e.at % HOUR) / MINUTE);
+    for (let year = e.on.year ?? first; year <= (e.on.year ?? last); year++) {
+      const at = toEpoch(schedule.zone, { year, month: e.on.month, day: e.on.day, hour, minute });
+      if (at < from || at >= to) continue;
+      const l = toLocal(schedule.zone, at);
+      const dow = dayOfWeek(schedule.zone, at);
+      if (l.month !== e.on.month || l.day !== e.on.day) continue; // a date that does not exist that year
+      if (!schedule.week.some((s) => s.day === dow && s.at === e.at)) {
+        warn(work, 'exception-matches-no-slot', 'warning', at, `${dow}@${e.at}`,
+          `the exception for ${e.on.month}/${e.on.day} at ${Math.floor(e.at / HOUR)}:${String(minute).padStart(2, '0')} replaces nothing: no slot starts then, so it was ignored`);
+      }
+    }
+  }
 }
 
 function warn(work: Work, code: PlanWarningCode, severity: WarningSeverity, at: Ms, slotId: string, message: string): void {

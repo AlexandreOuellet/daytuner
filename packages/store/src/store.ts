@@ -217,6 +217,12 @@ export class Store {
     if (Number(r.changes) === 0) throw new StoreError(`no channel named "${name}"`);
   }
 
+  /** Adopts a new end for the committed lineup by hand (a resync). The state is not touched. */
+  setEdge(name: string, edge: number): void {
+    const r = this.db.prepare('update channels set edge = ? where name = ?').run(edge, name);
+    if (Number(r.changes) === 0) throw new StoreError(`no channel named "${name}"`);
+  }
+
   pendingCommit(channelId: number): CommitRecord | undefined {
     const r = this.db.prepare("select * from commits where channel_id = ? and status = 'pending'").get(channelId);
     return r ? commitOf(r as Row) : undefined;

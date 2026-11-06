@@ -154,6 +154,59 @@ export async function topUp(deps: WorkerDeps, channelName: string, opts: TopUpOp
   };
 }
 
+export interface ResyncReport {
+  /** What was found, in words. */
+  found: string[];
+  /** What was done (or, for a dry run, would be done). */
+  actions: string[];
+  /** True when the planner state may no longer match what is in Tunarr, so a person should look at the cursors. */
+  stateMayBeStale: boolean;
+}
+
+/**
+ * Brings the store back in line with Tunarr after the worker refused to write. A commit left pending
+ * is settled exactly as the worker would settle it. Anything else is adopted: the store takes
+ * Tunarr's end as the new end, and says so when the state may now be out of step with the lineup.
+ * It never writes to Tunarr. A dry run changes nothing.
+ */
+export async function resync(deps: WorkerDeps, channelName: string, opts: { dryRun?: boolean } = {}): Promise<ResyncReport> {
+  const { store, client, clock } = deps;
+  const ch = store.channel(channelName);
+  if (!ch) throw new ConsistencyError(`no channel named "${channelName}" in the store`);
+  const tun = await client.channel(ch.tunarrId);
+  const edgeNow = tun.startTime + tun.duration;
+  const report: ResyncReport = { found: [], actions: [], stateMayBeStale: false };
+  const dry = opts.dryRun === true;
+
+  const pending = store.pendingCommit(ch.id);
+  if (pending) {
+    report.found.push(`commit ${pending.id} is pending (it was to take the lineup from ${pending.fromEdge} to ${pending.toEdge})`);
+    if (same(edgeNow, pending.toEdge)) {
+      report.actions.push(`complete commit ${pending.id}: Tunarr already has what it wrote`);
+      if (!dry) store.completeCommit(pending.id, edgeNow, clock.now());
+      return report;
+    }
+    if (same(edgeNow, pending.fromEdge)) {
+      report.actions.push(`drop commit ${pending.id}: its append never reached Tunarr`);
+      if (!dry) store.abandonCommit(pending.id, clock.now());
+      return report;
+    }
+    report.actions.push(`drop commit ${pending.id}: Tunarr's lineup matches neither end of it`);
+    report.stateMayBeStale = true;
+    if (!dry) store.abandonCommit(pending.id, clock.now());
+  }
+
+  if (same(edgeNow, ch.edge)) {
+    report.found.push("Tunarr's lineup ends where the store says; nothing to adopt");
+    return report;
+  }
+  report.found.push(`Tunarr's lineup ends at ${edgeNow} but the store recorded ${ch.edge}`);
+  report.actions.push(`record ${edgeNow} as the end of the committed lineup`);
+  report.stateMayBeStale = true;
+  if (!dry) store.setEdge(channelName, edgeNow);
+  return report;
+}
+
 export interface SequenceInfo {
   /** The key the store uses for this ordered pool's place. */
   key: string;

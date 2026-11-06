@@ -118,6 +118,24 @@ describe('the command line', () => {
     expect(said()).toContain('WARNING');
   });
 
+  it('recovers with resync after the channel was changed outside DayTuner', async () => {
+    await run('channel', 'add', join(dir, 'test.yaml'));
+    fake.appendExternally([{ type: 'flex', duration: 5 * MIN }]);
+    expect(await run('run', 'Test', '--yes')).toBe(3);
+    out.length = 0;
+    expect(await run('channel', 'resync', 'Test')).toBe(0); // a dry run
+    expect(said()).toContain('Would do: record');
+    expect(said()).toContain('dry run');
+    expect(await run('run', 'Test', '--yes')).toBe(3);
+    out.length = 0;
+    expect(await run('channel', 'resync', 'Test', '--yes')).toBe(0);
+    expect(said()).toContain('Done: record');
+    expect(said()).toContain('may no longer match');
+    out.length = 0;
+    expect(await run('run', 'Test', '--yes')).toBe(0);
+    expect(said()).toMatch(/Appended: \d+ slots/);
+  });
+
   it('previews without a store', async () => {
     expect(await run('preview', join(dir, 'test.yaml'), '--days', '2', '--from', '2026-11-09T00:00:00Z')).toBe(0);
     expect(said()).toContain('grid accuracy');

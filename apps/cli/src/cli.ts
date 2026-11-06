@@ -5,6 +5,7 @@
 //   channel set-schedule <name> <channel.yaml>
 //   channel list
 //   channel status <name>
+//   channel resync <name> [--yes]               adopt Tunarr's real end after a refusal; a dry run unless --yes
 //   run <name> [--yes]                          top the channel up; a dry run unless --yes
 //   cursor <name> list
 //   cursor <name> rewind <sequence> <k>         for a missed week
@@ -18,7 +19,7 @@ import { alignToGrid, TunarrClient, type FetchLike } from '@daytuner/tunarr-clie
 import { ceilToGrid, computeMetrics, DAY, emptyPlanState, plan, type Clock } from '@daytuner/engine';
 import { parseDuration, parseScheduleFile, resolveSchedule } from '@daytuner/schedule';
 import { Store } from '@daytuner/store';
-import { adjustCursor, ConsistencyError, listSequences, topUp } from '@daytuner/worker';
+import { adjustCursor, ConsistencyError, listSequences, resync, topUp } from '@daytuner/worker';
 import { formatMetrics, formatWarnings, inZone } from './format.js';
 
 export interface CliEnv {
@@ -34,7 +35,7 @@ const USAGE = `Usage:
   daytuner preview <channel.yaml> [--from ISO] [--days N] [--seed N]
   daytuner channel add <channel.yaml> [--channel NAME] [--seed N] [--floor 7d] [--step 24h]
   daytuner channel set-schedule <name> <channel.yaml>
-  daytuner channel list | status <name>
+  daytuner channel list | status <name> | resync <name> [--yes]
   daytuner run <name> [--yes]            (a dry run without --yes)
   daytuner cursor <name> list | rewind <sequence> <k> | set <sequence> <episode-number>
 Common: --tunarr URL (or TUNARR_URL)  --db FILE (or DAYTUNER_DB, default state/daytuner.db)`;
@@ -71,13 +72,13 @@ export async function runCli(argv: string[], io: CliEnv): Promise<number> {
       const days = Number(values.days);
       if (!Number.isInteger(days) || days <= 0) throw new Error('--days must be a positive whole number');
       const client = reader();
-      const { schedule, library } = await resolveSchedule(parseScheduleFile(readFileSync(rest[0], 'utf8')), client);
+      const { schedule, library, titles } = await resolveSchedule(parseScheduleFile(readFileSync(rest[0], 'utf8')), client);
       let from = values.from ? Date.parse(values.from) : io.clock.now();
       if (!Number.isFinite(from)) throw new Error(`--from "${values.from}" is not a date`);
       from = ceilToGrid(from, schedule.grid);
       const result = plan({ schedule, library, state: emptyPlanState(Number(values.seed)), from, to: from + days * DAY });
       io.out(`DayTuner preview from ${inZone(from, schedule.zone)} (${schedule.zone}) for ${days} day(s), seed ${values.seed}`);
-      io.out(`\n${formatMetrics(computeMetrics(result.slots, { grid: schedule.grid, zone: schedule.zone }))}\n\n${formatWarnings(result.warnings, schedule.zone)}`);
+      io.out(`\n${formatMetrics(computeMetrics(result.slots, { grid: schedule.grid, zone: schedule.zone }))}\n\n${formatWarnings(result.warnings, schedule.zone, titles)}`);
       return 0;
     }
 
@@ -117,6 +118,17 @@ export async function runCli(argv: string[], io: CliEnv): Promise<number> {
         store.close();
         return 0;
       }
+      if (sub === 'resync' && a) {
+        const store = openStore();
+        const r = await resync({ store, client: reader(), clock: io.clock }, a, { dryRun: !values.yes });
+        for (const line of r.found) io.out(`Found: ${line}`);
+        for (const line of r.actions) io.out(`${values.yes ? 'Done' : 'Would do'}: ${line}`);
+        if (r.actions.length === 0) io.out('Nothing to do.');
+        if (r.stateMayBeStale) io.out("The planner's state may no longer match what is in Tunarr. Check the shows' places with `cursor " + a + ' list` and adjust them if needed.');
+        if (!values.yes && r.actions.length > 0) io.out('This was a dry run. Add --yes to apply it. Nothing was written to Tunarr either way.');
+        store.close();
+        return 0;
+      }
       if (sub === 'status' && a) {
         const store = openStore();
         const ch = store.channel(a);
@@ -148,11 +160,9 @@ export async function runCli(argv: string[], io: CliEnv): Promise<number> {
       } else {
         const verb = r.action === 'appended' ? 'Appended' : 'Would append (dry run, nothing was written)';
         io.out(`${verb}: ${r.slots} slots, ${r.items} items, ${dayLabel(r.totalMs ?? 0)}. The lineup was ${dayLabel(r.aheadBefore)} ahead.`);
-        if (r.planned) {
-          const { schedule } = await resolveSchedule(parseScheduleFile(ch.schedule), client);
-          io.out(`\n${formatMetrics(computeMetrics(r.planned, { grid: schedule.grid, zone: schedule.zone }))}`);
-        }
-        io.out(`\n${formatWarnings(r.warnings, zone)}`);
+        const resolved = await resolveSchedule(parseScheduleFile(ch.schedule), client);
+        if (r.planned) io.out(`\n${formatMetrics(computeMetrics(r.planned, { grid: resolved.schedule.grid, zone: resolved.schedule.zone }))}`);
+        io.out(`\n${formatWarnings(r.warnings, zone, resolved.titles)}`);
         if (r.action === 'would-append') io.out('\nAdd --yes to write this to Tunarr.');
       }
       store.close();

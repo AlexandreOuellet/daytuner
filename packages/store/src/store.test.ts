@@ -119,6 +119,18 @@ describe('a file on disk', () => {
   });
 });
 
+describe('setEdge', () => {
+  it('moves only the edge', () => {
+    const store = Store.open(':memory:');
+    store.addChannel(channel());
+    store.setEdge('funny', 42.5);
+    expect(store.channel('funny')!.edge).toBe(42.5);
+    expect(store.channel('funny')!.state).toEqual(state(1));
+    expect(() => store.setEdge('ghost', 1)).toThrow(/no channel/);
+    store.close();
+  });
+});
+
 describe('cursor adjustments', () => {
   it('changes one sequence and logs it, and is refused while a commit is pending', () => {
     const store = Store.open(':memory:');

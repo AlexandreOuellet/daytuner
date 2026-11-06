@@ -171,6 +171,22 @@ describe('plan: exceptions', () => {
   });
 });
 
+describe('plan: an exception that matches no slot', () => {
+  const ex = (at: number, on: { month: number; day: number; year?: number }): Schedule =>
+    fixtureSchedule({ exceptions: [{ on, at, programId: 'm2' }] });
+
+  it('warns when it falls in the planned range and no slot starts then', () => {
+    const r = run({ schedule: ex(19 * HOUR, { month: 11, day: 9 }) }); // slots start at 18:00 and 20:00
+    expect(r.warnings.filter((w) => w.code === 'exception-matches-no-slot')).toHaveLength(1);
+    expect(r.slots[1]!.exception).toBe(false);
+  });
+  it('stays quiet when a slot starts then, or when the date is outside the range', () => {
+    expect(run({ schedule: ex(20 * HOUR, { month: 11, day: 9 }) }).warnings.some((w) => w.code === 'exception-matches-no-slot')).toBe(false);
+    expect(run({ schedule: ex(19 * HOUR, { month: 12, day: 25 }) }).warnings.some((w) => w.code === 'exception-matches-no-slot')).toBe(false);
+    expect(run({ schedule: ex(19 * HOUR, { month: 11, day: 9, year: 2031 }) }).warnings.some((w) => w.code === 'exception-matches-no-slot')).toBe(false);
+  });
+});
+
 describe('plan: anchors and windows', () => {
   it('cuts the window that contains the anchor and ends exactly there', () => {
     const anchor = local(2026, 11, 9, 21);

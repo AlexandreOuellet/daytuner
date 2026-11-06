@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { emptyPlanState } from '@daytuner/engine';
 import { Store } from '@daytuner/store';
 import { FakeTunarr, TunarrClient } from '@daytuner/tunarr-client';
-import { adjustCursor, ConsistencyError, listSequences, topUp, type WorkerDeps } from './worker.js';
+import { adjustCursor, ConsistencyError, listSequences, resync, topUp, type WorkerDeps } from './worker.js';
 
 const DAY = 86_400_000;
 const MIN = 60_000;
@@ -247,3 +247,42 @@ describe('a missed week', () => {
     await expect(adjustCursor(s.deps, 'Nope', 'seq:a', { kind: 'rewind', by: 1 })).rejects.toThrow(/no channel/);
   });
 });
+
+describe('resync', () => {
+  it('adopts Tunarr\'s end after a change made outside DayTuner, so the worker can carry on', async () => {
+    const s = setup();
+    s.fake.appendExternally([{ type: 'flex', duration: 5 * MIN }]);
+    await expect(topUp(s.deps, 'Test')).rejects.toBeInstanceOf(ConsistencyError);
+
+    const dry = await resync(s.deps, 'Test', { dryRun: true });
+    expect(dry.stateMayBeStale).toBe(true);
+    expect(dry.actions[0]).toMatch(/record .* as the end/);
+    await expect(topUp(s.deps, 'Test')).rejects.toBeInstanceOf(ConsistencyError); // a dry run changed nothing
+
+    await resync(s.deps, 'Test');
+    expect((await topUp(s.deps, 'Test')).action).toBe('appended');
+  });
+
+  it('settles a pending commit that did reach Tunarr, without calling the state stale', async () => {
+    const s = setup();
+    s.fake.crashAfterNextAppend = true;
+    await expect(topUp(s.deps, 'Test')).rejects.toThrow();
+    // Put the pending commit back, as if the process had died before settling it.
+    const ch = s.store.channel('Test')!;
+    const done = s.store.commits(ch.id)[0]!;
+    const fresh = Store.open(':memory:');
+    fresh.addChannel({ name: 'Test', tunarrId: 'chan-1', floorMs: 7 * DAY, stepMs: DAY, schedule: YAML, state: emptyPlanState(5), edge: done.fromEdge });
+    fresh.beginCommit({ channelId: fresh.channel('Test')!.id, fromEdge: done.fromEdge, toEdge: done.toEdge, state: done.state, items: done.items, totalMs: done.totalMs, slots: done.slots, at: 1 });
+    const r = await resync({ ...s.deps, store: fresh }, 'Test');
+    expect(r.actions[0]).toMatch(/complete commit/);
+    expect(r.stateMayBeStale).toBe(false);
+    expect(fresh.pendingCommit(fresh.channel('Test')!.id)).toBeUndefined();
+  });
+
+  it('has nothing to do when the store and Tunarr already agree', async () => {
+    const r = await resync(setup().deps, 'Test');
+    expect(r.actions).toEqual([]);
+    expect(r.found[0]).toMatch(/nothing to adopt/);
+  });
+});
+

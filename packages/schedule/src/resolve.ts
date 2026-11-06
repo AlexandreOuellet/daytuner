@@ -19,6 +19,8 @@ export interface Resolved {
   library: Library;
   /** Tunarr's id for each clip list the schedule uses, for writing lineup items. */
   fillerListIds: Record<string, string>;
+  /** A readable name for every program the schedule can use, to show people instead of ids. */
+  titles: Record<string, string>;
 }
 
 export class ResolveError extends Error {
@@ -43,6 +45,7 @@ export function takeTurns<T>(lists: readonly (readonly T[])[]): T[] {
 
 export async function resolveSchedule(file: ScheduleFile, source: LibrarySource): Promise<Resolved> {
   const programs: Library['programs'] = {};
+  const titles: Record<string, string> = {};
 
   // Clip lists.
   const listNames = new Set<string>();
@@ -80,7 +83,10 @@ export async function resolveSchedule(file: ScheduleFile, source: LibrarySource)
       const perShow: string[][] = [];
       for (const title of def.shows) {
         const eps = await episodesOfShow(title);
-        for (const e of eps) programs[e.id] = { duration: e.duration };
+        for (const e of eps) {
+          programs[e.id] = { duration: e.duration };
+          titles[e.id] = `${title} S${e.season}E${e.episode} "${e.title}"`;
+        }
         perShow.push(eps.map((e) => e.id));
       }
       ids = takeTurns(perShow);
@@ -91,7 +97,10 @@ export async function resolveSchedule(file: ScheduleFile, source: LibrarySource)
       const chosen = movieList.filter(
         (x) => (m.genre === undefined || x.genres.some((g) => same(g, m.genre!))) && (m.duration === undefined || matchesFilter(x.duration, m.duration)),
       );
-      for (const x of chosen) programs[x.id] = { duration: x.duration };
+      for (const x of chosen) {
+        programs[x.id] = { duration: x.duration };
+        titles[x.id] = x.title;
+      }
       ids = chosen.map((x) => x.id);
       order = def.order === 'sequential' ? 'ordered' : 'shuffled';
     }
@@ -108,6 +117,7 @@ export async function resolveSchedule(file: ScheduleFile, source: LibrarySource)
       const ep = eps.find((x) => same(x.title, (e.play as { title: string }).title));
       if (!ep) throw new ResolveError(`"${e.play.show}" has no episode titled "${e.play.title}"`);
       programs[ep.id] = { duration: ep.duration };
+      titles[ep.id] = `${e.play.show} "${ep.title}"`;
       programId = ep.id;
     } else {
       movieList ??= await source.movies();
@@ -115,6 +125,7 @@ export async function resolveSchedule(file: ScheduleFile, source: LibrarySource)
       const mv = movieList.find((x) => same(x.title, title));
       if (!mv) throw new ResolveError(`there is no movie titled "${title}"`);
       programs[mv.id] = { duration: mv.duration };
+      titles[mv.id] = mv.title;
       programId = mv.id;
     }
     if (typeof e.counts === 'string' && !(e.counts in pools)) throw new ResolveError(`exception counts against an unknown pool "${e.counts}"`);
@@ -168,5 +179,5 @@ export async function resolveSchedule(file: ScheduleFile, source: LibrarySource)
     week,
     exceptions,
   };
-  return { schedule, library: { programs, clips }, fillerListIds };
+  return { schedule, library: { programs, clips }, fillerListIds, titles };
 }

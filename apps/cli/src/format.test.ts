@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatMetrics, formatWarnings, inZone, slotLabel } from './format.js';
+import { formatMetrics, formatWarnings, inZone, slotLabel, withTitles } from './format.js';
 import { computeMetrics } from '@daytuner/engine';
 
 describe('formatting', () => {
@@ -23,6 +23,13 @@ describe('formatting', () => {
     expect(text).toContain('1 alert, 0 warning, 1 info');
     expect(text.indexOf('[alert]')).toBeLessThan(text.indexOf('[info]'));
     expect(formatWarnings([], 'America/Toronto')).toBe('No warnings.');
+  });
+  it('shows titles instead of ids in a warning', () => {
+    const id = 'bedf888c-9112-41fa-86c4-cc6baf06090d';
+    expect(withTitles(`the next episode (${id}) does not fit`, { [id]: 'Ted Lasso S2E3 "Headspace"' })).toBe('the next episode (Ted Lasso S2E3 "Headspace") does not fit');
+    const text = formatWarnings([{ code: 'sequential-does-not-fit', severity: 'warning', at: 0, slotId: '1@0', message: `episode ${id} late` }], 'America/Toronto', { [id]: 'Show S1E1 "x"' });
+    expect(text).toContain('Show S1E1 "x"');
+    expect(text).not.toContain(id);
   });
   it('prints metrics for an empty plan without failing', () => {
     expect(formatMetrics(computeMetrics([], { grid: 900_000, zone: 'America/Toronto' }))).toContain('Slots measured: 0');

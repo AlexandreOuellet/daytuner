@@ -36,6 +36,13 @@ describe('the example channel file', () => {
     expect(r.library.programs[r.schedule.exceptions[0]!.programId]).toBeDefined();
   });
 
+  it('gives every program a readable title', async () => {
+    const r = await resolveSchedule(file, fakeSource());
+    expect(r.titles['office-1']).toBe('The Office S1E1 "Episode 1"');
+    expect(r.titles['mov-comedy-90']).toBe('Short Laughs');
+    for (const id of Object.keys(r.library.programs)) expect(r.titles[id]).toBeTruthy();
+  });
+
   it('plans a Sunday end to end with the engine', async () => {
     const r = await resolveSchedule(file, fakeSource());
     const from = toLocalForTest(2026, 11, 8, 0);

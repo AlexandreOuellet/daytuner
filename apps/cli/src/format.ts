@@ -50,13 +50,20 @@ export function inZone(ms: number, zone: string): string {
   return `${g('year')}-${g('month')}-${g('day')} ${g('hour')}:${g('minute')}`;
 }
 
-export function formatWarnings(warnings: readonly PlanWarning[], zone: string, max = 25): string {
+/** Replaces every program id in a message by its title. */
+export function withTitles(message: string, titles: Readonly<Record<string, string>>): string {
+  let out = message;
+  for (const [id, title] of Object.entries(titles)) if (out.includes(id)) out = out.split(id).join(title);
+  return out;
+}
+
+export function formatWarnings(warnings: readonly PlanWarning[], zone: string, titles: Readonly<Record<string, string>> = {}, max = 25): string {
   if (warnings.length === 0) return 'No warnings.';
   const order = { alert: 0, warning: 1, info: 2 } as const;
   const sorted = [...warnings].sort((a, b) => order[a.severity] - order[b.severity] || a.at - b.at);
   const counts = { alert: 0, warning: 0, info: 0 };
   for (const w of warnings) counts[w.severity]++;
-  const lines = sorted.slice(0, max).map((w) => `  [${w.severity}] ${inZone(w.at, zone)} ${slotLabel(w.slotId)}: ${w.message}`);
+  const lines = sorted.slice(0, max).map((w) => `  [${w.severity}] ${inZone(w.at, zone)} ${slotLabel(w.slotId)}: ${withTitles(w.message, titles)}`);
   if (sorted.length > max) lines.push(`  ... and ${sorted.length - max} more`);
   return `Warnings: ${counts.alert} alert, ${counts.warning} warning, ${counts.info} info\n${lines.join('\n')}`;
 }

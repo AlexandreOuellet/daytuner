@@ -130,6 +130,7 @@ export type PlanWarningCode =
   | 'exception-does-not-fit'
   | 'rerun-short-history'
   | 'started-mid-slot'
+  | 'exception-matches-no-slot'
   | 'block';
 
 export interface PlanWarning {
