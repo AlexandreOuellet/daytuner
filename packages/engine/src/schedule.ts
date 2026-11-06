@@ -112,6 +112,9 @@ export interface PlannedSlot {
   end: Ms;
   pool: string;
   programs: string[];
+  /** The blocks in order. A block starts where the previous one ended; the first starts at the slot's
+   *  start (head included) and the last ends at the slot's end (tail included). */
+  blocks: { programId: string; start: Ms; end: Ms }[];
   /** True when an exception replaced the slot's normal programming. */
   exception: boolean;
   items: Item[];

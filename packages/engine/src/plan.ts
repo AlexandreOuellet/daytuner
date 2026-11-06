@@ -209,6 +209,7 @@ function planWindow(ctx: Ctx, work: Work, w: Window): PlannedSlot {
     end: w.end,
     pool: w.slot.pool,
     programs: placed.map((p) => p.programId),
+    blocks: placed.map((p) => ({ programId: p.programId, start: p.block.start, end: p.block.end })),
     exception: result.explicit,
     items,
   };
@@ -440,7 +441,12 @@ function layoutItems(ctx: Ctx, work: Work, w: Window, placed: Placed[], edges: E
     }
     if (left > 0) {
       out.push({ kind: 'flex', duration: left });
-      warn(work, 'dead-air', left >= schedule.grid ? 'alert' : 'warning', at, w.slotId, `${Math.round(left / 1000)} s of dead air`);
+      // A few seconds is inherent (clips are whole) and is counted in the metrics. Only noticeable
+      // dead air is a warning.
+      if (left >= 15_000) {
+        warn(work, 'dead-air', left >= schedule.grid ? 'alert' : left >= MINUTE ? 'warning' : 'info', at, w.slotId,
+          `${Math.round(left / 1000)} s of dead air`);
+      }
     }
     return out;
   };

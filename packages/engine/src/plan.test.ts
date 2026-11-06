@@ -6,7 +6,7 @@ import { HOUR, MINUTE, SECOND } from './time.js';
 
 const library = fixtureLibrary();
 const GOLDEN_PROGRAMS: string[][] = [['ep1', 'ep2', 'ep3', 'ep4'], ['m4'], ['ep2', 'ep3', 'ep4']];
-const GOLDEN_FINGERPRINT = 'a1506097';
+const GOLDEN_FINGERPRINT = '40a79fc4';
 const run = (over: { schedule?: Schedule; state?: ReturnType<typeof freshState>; from?: number; to?: number; exact?: boolean } = {}): PlanResult =>
   plan({
     schedule: over.schedule ?? fixtureSchedule(),
@@ -235,6 +235,19 @@ describe('plan: head, tail and bumpers', () => {
     const lastContent = s.items.map((i) => i.kind).lastIndexOf('content');
     const after = s.items[lastContent + 1]!;
     expect(after.kind === 'filler' && after.role === 'bumper' && after.position === 'post').toBe(true);
+  });
+});
+
+describe('plan: dead air warnings', () => {
+  it('stay quiet about a few seconds, which whole clips make unavoidable, and flag real gaps', () => {
+    const r = run();
+    const flex = r.slots.flatMap((s) => s.items).filter((i) => i.kind === 'flex');
+    expect(flex.length).toBeGreaterThan(0); // dead air exists...
+    for (const w of r.warnings.filter((x) => x.code === 'dead-air')) {
+      expect(Number(/(\d+) s of dead air/.exec(w.message)![1])).toBeGreaterThanOrEqual(15); // ...but only 15 s or more warns
+    }
+    const empty = plan({ schedule: fixtureSchedule({ pools: { office: { order: 'ordered', programs: ['epic'] }, movies: { order: 'shuffled', programs: ['m1'] } } }), library, state: freshState(), from: local(2026, 11, 9, 18), to: local(2026, 11, 9, 20) });
+    expect(empty.warnings.some((w) => w.code === 'nothing-fits' && w.severity === 'alert')).toBe(true);
   });
 });
 
