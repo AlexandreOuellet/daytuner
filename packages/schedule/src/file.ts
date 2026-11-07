@@ -46,8 +46,11 @@ const midPosition = z.object({
 
 const list = z.object({ list: z.string() }).strict();
 
+/** A show is a title, or a title plus the library's id for it (the id decides when present). */
+const showRef = z.union([z.string(), z.object({ show: z.string(), id: z.string().optional() }).strict()]);
+
 const pool = z.object({
-  shows: z.array(z.string()).min(1).optional(),
+  shows: z.array(showRef).min(1).optional(),
   movies: z.object({
     genre: z.string().optional(),
     duration: z.string().transform(via(parseDurationFilter)).optional(),
@@ -58,8 +61,8 @@ const pool = z.object({
 });
 
 const play = z.union([
-  z.object({ show: z.string(), title: z.string() }).strict(),
-  z.object({ movie: z.string() }).strict(),
+  z.object({ show: z.string(), id: z.string().optional(), title: z.string() }).strict(),
+  z.object({ movie: z.string(), id: z.string().optional() }).strict(),
 ]);
 
 const exception = z.object({

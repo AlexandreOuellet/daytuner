@@ -104,3 +104,38 @@ describe('mistakes are reported clearly', () => {
     await expect(resolveSchedule(badEx, fakeSource())).rejects.toThrow(/no episode titled "Nope"/);
   });
 });
+
+describe('shows picked by id with a title label', () => {
+  const file = parseScheduleFile(EXAMPLE);
+  const withShows = (shows: (string | { show: string; id?: string })[]) => ({ ...file, exceptions: [], pools: { ...file.pools, 'office-hours': { shows } } });
+
+  it('a title shared by two shows is an error that lists the ids', async () => {
+    await expect(resolveSchedule(withShows(['Doctor Who']), fakeSource({ duplicateWho: true }))).rejects.toThrow(/more than one show named "Doctor Who"; add an id: show-who, show-who-2005/);
+  });
+  it('an id picks the show and ignores the title', async () => {
+    const r = await resolveSchedule(withShows([{ show: 'Doctor Who', id: 'show-who-2005' }]), fakeSource({ duplicateWho: true }));
+    expect(r.schedule.pools['office-hours']!.programs[0]).toBe('who2005-1');
+    expect(r.notes).toEqual([]);
+  });
+  it('a label that no longer matches the library only adds a note', async () => {
+    const r = await resolveSchedule(withShows([{ show: 'The Office (US)', id: 'show-office' }]), fakeSource());
+    expect(r.schedule.pools['office-hours']!.programs[0]).toBe('office-1');
+    expect(r.notes).toEqual(['the show with id "show-office" is now titled "The Office", the file labels it "The Office (US)"']);
+  });
+  it('an unknown id is an error', async () => {
+    await expect(resolveSchedule(withShows([{ show: 'The Office', id: 'nope' }]), fakeSource())).rejects.toThrow(/no show with id "nope"/);
+  });
+  it('exceptions take an id for a show or a movie', async () => {
+    const ex = { ...file.exceptions[0]!, play: { show: 'Doctor Who', id: 'show-who-2005', title: 'Halloween Special' } };
+    const r = await resolveSchedule({ ...file, exceptions: [ex] }, fakeSource({ duplicateWho: true }));
+    expect(r.schedule.exceptions[0]!.programId).toBe('who2005-4');
+    const mv = { ...file.exceptions[0]!, play: { movie: 'Old Name', id: 'mov-comedy-90' } };
+    const r2 = await resolveSchedule({ ...file, exceptions: [mv] }, fakeSource());
+    expect(r2.schedule.exceptions[0]!.programId).toBe('mov-comedy-90');
+    expect(r2.notes[0]).toMatch(/now titled "Short Laughs"/);
+  });
+  it('the channel file accepts both forms', () => {
+    const text = EXAMPLE.replace(/shows: \[The Office[^\n]*\]/, 'shows: [The Office, { show: Doctor Who, id: abc }]');
+    expect(() => parseScheduleFile(text)).not.toThrow();
+  });
+});

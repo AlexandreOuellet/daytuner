@@ -15,7 +15,7 @@ are in [`roadmap.md`](roadmap.md); verified Tunarr facts are in [`tunarr-api.md`
 | 4 Schedules and staging | not started | Needs design first |
 | 5 Web interface | not started | Needs design first |
 
-Tests: 211 pass across the engine, client, store, schedule, worker and CLI, plus 3 client integration
+Tests: 226 pass across the engine, client, store, schedule, worker and CLI, plus 3 client integration
 tests that run only against a real Tunarr (`TUNARR_URL`).
 
 ## Needed for 1.0
@@ -70,7 +70,6 @@ Each is one of: **build** (clear what to do), **verify** (find out), **know** (a
 - **build** A verified append that did not match leaves the commit pending, with no tool to inspect or close it.
 - **build** Adding a channel starts from a fresh state: an existing channel's place in its shows is not
   read from its history, so ordered shows begin at episode 1 unless adjusted with `cursor set`.
-- **build** Show matching by `id` with a `title` label (decided; the reader matches by title only today).
 - **build** The metrics are not stored over time, which the dashboard needs.
 - **verify** Playback of ad and filler clips and the media server's guide (phase 3, above).
 - **know** A lineup whose end is fractional (older lineups) gets one rounded flex to the next grid

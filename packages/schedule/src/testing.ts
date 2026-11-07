@@ -15,7 +15,7 @@ const shows: Record<string, { id: string; title: string; episodes: number; minut
 };
 const prefix: Record<string, string> = { 'show-office': 'office', 'show-parks': 'parks', 'show-rock': 'rock', 'show-who': 'who' };
 
-export function fakeSource(): LibrarySource {
+export function fakeSource(opts: { duplicateWho?: boolean } = {}): LibrarySource {
   const movies = [
     { id: 'mov-comedy-90', title: 'Short Laughs', duration: 90 * MIN, genres: ['Comedy'] },
     { id: 'mov-comedy-100', title: 'Mid Laughs', duration: 100 * MIN, genres: ['comedy'] },
@@ -26,12 +26,15 @@ export function fakeSource(): LibrarySource {
   ];
   return {
     movies: async () => movies,
-    shows: async () => Object.values(shows).map((s) => ({ id: s.id, title: s.title })),
+    shows: async () => [
+      ...Object.values(shows).map((s) => ({ id: s.id, title: s.title })),
+      ...(opts.duplicateWho ? [{ id: 'show-who-2005', title: 'Doctor Who' }] : []),
+    ],
     episodes: async (showId) => {
-      const s = Object.values(shows).find((x) => x.id === showId)!;
+      const s = Object.values(shows).find((x) => x.id === showId) ?? shows['Doctor Who']!;
       return Array.from({ length: s.episodes }, (_, i) => ({
-        id: `${prefix[showId]}-${i + 1}`,
-        title: showId === 'show-who' && i === 3 ? 'Halloween Special' : `Episode ${i + 1}`,
+        id: `${prefix[showId] ?? 'who2005'}-${i + 1}`,
+        title: (showId === 'show-who' || !prefix[showId]) && i === 3 ? 'Halloween Special' : `Episode ${i + 1}`,
         duration: s.minutes * MIN + 1000,
         season: 1,
         episode: i + 1,

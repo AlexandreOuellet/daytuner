@@ -23,6 +23,8 @@ lateness: 0                      # as in Tunarr; 0 keeps the grid exact. Per slo
 
 pools:
   office-hours:
+    # A show is a title, or { show: <title>, id: <library id> }. With an id, the id decides and the title
+    # is only a label. A title shared by two shows needs the id.
     shows: [The Office, Parks and Recreation, 30 Rock]
     order: sequential            # never skips an episode; each slot has its own cursor
   comedy-movies-up-to-117:

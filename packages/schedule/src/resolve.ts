@@ -21,6 +21,8 @@ export interface Resolved {
   fillerListIds: Record<string, string>;
   /** A readable name for every program the schedule can use, to show people instead of ids. */
   titles: Record<string, string>;
+  /** Things worth telling the owner that do not stop the plan, such as a label that no longer matches. */
+  notes: string[];
 }
 
 export class ResolveError extends Error {
@@ -46,6 +48,7 @@ export function takeTurns<T>(lists: readonly (readonly T[])[]): T[] {
 export async function resolveSchedule(file: ScheduleFile, source: LibrarySource): Promise<Resolved> {
   const programs: Library['programs'] = {};
   const titles: Record<string, string> = {};
+  const notes: string[] = [];
 
   // Clip lists.
   const listNames = new Set<string>();
@@ -67,11 +70,19 @@ export async function resolveSchedule(file: ScheduleFile, source: LibrarySource)
   // Pools.
   let showList: Awaited<ReturnType<LibrarySource['shows']>> | undefined;
   let movieList: Awaited<ReturnType<LibrarySource['movies']>> | undefined;
-  const episodesOfShow = async (title: string) => {
+  const episodesOfShow = async (title: string, id?: string) => {
     showList ??= await source.shows();
+    if (id !== undefined) {
+      const found = showList.find((s) => s.id === id);
+      if (!found) throw new ResolveError(`there is no show with id "${id}" (labelled "${title}")`);
+      if (!same(found.title, title)) notes.push(`the show with id "${id}" is now titled "${found.title}", the file labels it "${title}"`);
+      return source.episodes(found.id);
+    }
     const matches = showList.filter((s) => same(s.title, title));
     if (matches.length === 0) throw new ResolveError(`there is no show named "${title}"`);
-    if (matches.length > 1) throw new ResolveError(`there is more than one show named "${title}"`);
+    if (matches.length > 1) {
+      throw new ResolveError(`there is more than one show named "${title}"; add an id: ${matches.map((m) => m.id).join(', ')}`);
+    }
     return source.episodes(matches[0]!.id);
   };
 
@@ -81,8 +92,9 @@ export async function resolveSchedule(file: ScheduleFile, source: LibrarySource)
     let order: Pool['order'];
     if (def.shows) {
       const perShow: string[][] = [];
-      for (const title of def.shows) {
-        const eps = await episodesOfShow(title);
+      for (const ref of def.shows) {
+        const { title, id } = typeof ref === 'string' ? { title: ref, id: undefined } : { title: ref.show, id: ref.id };
+        const eps = await episodesOfShow(title, id);
         for (const e of eps) {
           programs[e.id] = { duration: e.duration };
           titles[e.id] = `${title} S${e.season}E${e.episode} "${e.title}"`;
@@ -113,7 +125,7 @@ export async function resolveSchedule(file: ScheduleFile, source: LibrarySource)
   for (const e of file.exceptions) {
     let programId: string;
     if ('show' in e.play) {
-      const eps = await episodesOfShow(e.play.show);
+      const eps = await episodesOfShow(e.play.show, e.play.id);
       const ep = eps.find((x) => same(x.title, (e.play as { title: string }).title));
       if (!ep) throw new ResolveError(`"${e.play.show}" has no episode titled "${e.play.title}"`);
       programs[ep.id] = { duration: ep.duration };
@@ -122,8 +134,9 @@ export async function resolveSchedule(file: ScheduleFile, source: LibrarySource)
     } else {
       movieList ??= await source.movies();
       const title = e.play.movie;
-      const mv = movieList.find((x) => same(x.title, title));
-      if (!mv) throw new ResolveError(`there is no movie titled "${title}"`);
+      const mv = e.play.id !== undefined ? movieList.find((x) => x.id === e.play.id) : movieList.find((x) => same(x.title, title));
+      if (!mv) throw new ResolveError(e.play.id !== undefined ? `there is no movie with id "${e.play.id}" (labelled "${title}")` : `there is no movie titled "${title}"`);
+      if (e.play.id !== undefined && !same(mv.title, title)) notes.push(`the movie with id "${e.play.id}" is now titled "${mv.title}", the file labels it "${title}"`);
       programs[mv.id] = { duration: mv.duration };
       titles[mv.id] = mv.title;
       programId = mv.id;
@@ -179,5 +192,5 @@ export async function resolveSchedule(file: ScheduleFile, source: LibrarySource)
     week,
     exceptions,
   };
-  return { schedule, library: { programs, clips }, fillerListIds, titles };
+  return { schedule, library: { programs, clips }, fillerListIds, titles, notes };
 }
