@@ -11,7 +11,7 @@ are in [`roadmap.md`](roadmap.md); verified Tunarr facts are in [`tunarr-api.md`
 | 0 Skeleton | done | Documentation, the verified API facts, the spike script |
 | 1 Engine | done | Time and grid, breaks, blocks, pools, clips, `plan()`, metrics. 137 tests, a golden test |
 | 2 Client and CLI | done | Reads the library, appends verified lineups, `preview`. Run end to end on the test copy |
-| 3 State and worker | built, not fully verified | SQLite store, safe top-up worker, `channel`, `run`, `cursor` commands. Run end to end on the test copy. Playback, guides and a multi-year lineup not checked |
+| 3 State and worker | built, not fully verified | SQLite store, safe top-up worker, `channel`, `run`, `cursor` commands. Run end to end on the test copy. Ad and filler playback and the media server's guide not checked |
 | 4 Schedules and staging | not started | Needs design first |
 | 5 Web interface | not started | Needs design first |
 
@@ -25,11 +25,11 @@ Nothing is pushed publicly until all of this is done (see the roadmap).
 **Phase 3, to finish**
 - [x] Playback of programs in a lineup DayTuner wrote: right media, seek and remaining time to within
       44 ms across a split program (see `tunarr-api.md`)
-- [ ] Playback of the ad and filler clips: needs a pod that mounts `/ads` (video files); the test
+- [ ] Playback of the ad and filler clips: needs a Tunarr that mounts a directory of video clips, set by configuration (DayTuner never reads that path; Tunarr does); the test
       library's other filler list is audio-only tracks, which the stock player cannot remux
 - [x] Tunarr's XMLTV guide after an append: programme starts exactly on the grid, contiguous
 - [ ] The media server's guide (Jellyfin reading Tunarr's XMLTV) after an append
-- [ ] How a synthetic multi-year lineup behaves (memory, startup time, `now_playing`)
+- [-] Synthetic multi-year lineup: the owner decided not to run it
 
 **Phase 4: schedules and staging**
 - [ ] Schedules in the store with revisions and rollback (today: one stored copy of the YAML)
@@ -48,22 +48,15 @@ Nothing is pushed publicly until all of this is done (see the roadmap).
 
 **Release**
 - [ ] A verified end-to-end run on a test copy of Tunarr, including playback and the guide check
-- [ ] A way to run it: a container image, and something that runs the worker daily
+- [ ] A way to run it: a container image whose own scheduler runs the worker daily (decided)
 
 ## Open decisions (the owner decides)
 
+Settled this session and recorded under Decided in the roadmap: the exception fallback (warning and dead air), no ad overrides and no overflow or lateness in 1.0, a scheduler inside the container, shows named by id plus title label, mid-break refinement later.
+
+
 - **Ad and bumper interface.** The model is decided. Open: how the web interface shows the positions plainly (phase 5).
-- **Exception that does not fit its slot.** The owner chose a warning and dead air; the engine plans
-  the slot as usual with an alert. Confirm or change.
-- **Mid-break offers** need refinement later (the owner's words): default chapter types, the minimum
-  gap, how breaks are spread.
-- **Ad settings per slot or pool.** One ad block per channel today. Is an override (for example a
-  longer break interval for movies) part of 1.0?
-- **Overflow and lateness above 0.** Decided to exist "as in Tunarr", but the engine and the channel
-  file reject anything above 0. In 1.0 or not?
-- **How a channel file names one of two shows with the same title** (an id, a year).
-- **How it is run.** The architecture says one container running the interface, API and worker; today the
-  worker is a one-shot command. Scheduler inside, or an outside cron or CronJob?
+- **Mid-break offers** need refinement, deferred by the owner until later.
 - **Phase 4 design.** To be settled with the owner before any code: how staged slots are stored, how
   pins and locks are addressed, what a conflict looks like, how revisions are diffed.
 
@@ -76,8 +69,9 @@ Each is one of: **build** (clear what to do), **verify** (find out), **know** (a
 - **build** A verified append that did not match leaves the commit pending, with no tool to inspect or close it.
 - **build** Adding a channel starts from a fresh state: an existing channel's place in its shows is not
   read from its history, so ordered shows begin at episode 1 unless adjusted with `cursor set`.
+- **build** Show matching by `id` with a `title` label (decided; the reader matches by title only today).
 - **build** The metrics are not stored over time, which the dashboard needs.
-- **verify** Playback of ad and filler clips, the media server's guide, and a multi-year lineup (phase 3, above).
+- **verify** Playback of ad and filler clips and the media server's guide (phase 3, above).
 - **know** A lineup whose end is fractional (older lineups) gets one rounded flex to the next grid
   line, so it stays up to half a millisecond off the grid from there on.
 - **know** `channel resync` adopts Tunarr's real end after a refusal, but then the planner state may not match what is in the lineup; a person has to check the shows' places.
@@ -106,8 +100,8 @@ exception fallback and the mid-break offers are under Open decisions above.)
 
 In this order:
 
-1. **Finish verifying phase 3.** Ad and filler clip playback (needs a pod that mounts `/ads`), the
-   media server's guide, then a multi-year lineup (adds tens of megabytes to the test pod).
+1. **Finish verifying phase 3.** Ad and filler clip playback (needs a test Tunarr with a configurable clip mount) and the
+   media server's guide. The multi-year lineup is dropped (owner's decision).
 2. **Close the remaining small build gaps** that make the worker safe to leave running: a way to
    inspect a commit that was pending after a verified append did not match, chapters, and reading an
    existing channel's place in its shows. (Done: `channel resync`, titles in warnings, the warning for

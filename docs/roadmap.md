@@ -50,6 +50,14 @@ Repository, documentation, the verified API facts, and the script that verified 
 - Language: TypeScript.
 - Storage: SQLite, schedules included. YAML import and export. No git sync.
 - Three tiers: speculative, staging, committed (see [`architecture.md`](architecture.md)).
+- Not in 1.0: ad settings per slot or pool (one ad block per channel), overflow and lateness above 0
+  (the engine and channel file keep rejecting them).
+- An exception that does not fit its slot: a warning and dead air; the slot is planned as usual with an alert.
+- The worker runs on a scheduler inside the container (the one-shot command stays for manual runs).
+- Mid-break refinement waits until after the first complete version.
+- A channel file picks a show by `id` plus a `title` label. With an id, the id decides and a changed
+  title only warns. Without one, the title decides, and a title shared by two shows is an error
+  listing the candidates with their ids and years. Generated files always carry both.
 - Ordered shows never skip (as in Tunarr), with a cursor per slot and slot linking
   (`continue` and `rerun`). Skip and defer is not in 1.0.
 - Lineups are append-only in 1.0: no trimming or rebasing, and the start time is never touched.
