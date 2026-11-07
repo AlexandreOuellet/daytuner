@@ -12,10 +12,10 @@ are in [`roadmap.md`](roadmap.md); verified Tunarr facts are in [`tunarr-api.md`
 | 1 Engine | done | Time and grid, breaks, blocks, pools, clips, `plan()`, metrics. 137 tests, a golden test |
 | 2 Client and CLI | done | Reads the library, appends verified lineups, `preview`. Run end to end on the test copy |
 | 3 State and worker | built, not fully verified | SQLite store, safe top-up worker, `channel`, `run`, `cursor` commands. Run end to end on the test copy. Ad and filler playback and the media server's guide not checked |
-| 4 Schedules and staging | started | Design settled (architecture.md, "Phase 4 storage"). Revisions and slices 1 to 3 of staging (store, `stage generate|show|clear|lock|unlock|pin|unpin`, locked slots committed as stored, lock conflicts, pins) built; structure edits and the preview diff to build |
+| 4 Schedules and staging | started | Design settled (architecture.md, "Phase 4 storage"). Revisions and slices 1 to 4 of staging (store, `stage generate|show|clear|lock|unlock|pin|unpin`, locked slots committed as stored, lock conflicts, pins, conflicts shown by `stage show`) built; structure edits and the preview diff to build |
 | 5 Web interface | not started | Needs design first |
 
-Tests: 288 pass across the engine, client, store, schedule, worker and CLI, plus 3 client integration
+Tests: 293 pass across the engine, client, store, schedule, worker and CLI, plus 3 client integration
 tests that run only against a real Tunarr (`TUNARR_URL`).
 
 ## Needed for 1.0

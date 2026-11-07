@@ -43,7 +43,7 @@ exactly there (existing rule).
    validity check (see Conflicts). Its effect on the state is applied as the planner would have: ordered
    shows advance by the episodes the slot took from the sequence, bags are marked with the programs and
    clips it used. The random generator's position is not replayed (it would need storing), so the plan after a lock can differ from the plan without it in which clips and movies come up next; it stays deterministic for the same inputs.
-4. **Conflicts.** `PlanResult.conflicts`: for each locked slot that failed its check, the slot, the reason
+4. **Conflicts (built).** `PlanResult.conflicts`: for each locked slot that failed its check, the slot, the reason
    (`program-gone`, `duration-changed`, `clip-gone`, `window-changed`, `grid-changed`) and what was done.
    The engine regenerates the slot with its pins kept, as an unlocked slot, and reports it. A slot that
    passes is used as stored.

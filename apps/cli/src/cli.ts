@@ -19,7 +19,7 @@ import { alignToGrid, TunarrClient, type FetchLike } from '@daytuner/tunarr-clie
 import { ceilToGrid, computeMetrics, DAY, emptyPlanState, plan, type Clock } from '@daytuner/engine';
 import { diffLines, findProgram, formatDiff, parseDuration, parseLocalDateTime, parseScheduleFile, resolveSchedule } from '@daytuner/schedule';
 import { Store } from '@daytuner/store';
-import { adjustCursor, adoptHistory, ConsistencyError, listSequences, placesFromLineup, resync, stageGenerate, topUp } from '@daytuner/worker';
+import { adjustCursor, adoptHistory, ConsistencyError, listSequences, placesFromLineup, resync, stageCheck, stageGenerate, topUp } from '@daytuner/worker';
 import { formatMetrics, formatWarnings, inZone, slotLabel } from './format.js';
 
 export interface CliEnv {
@@ -276,8 +276,16 @@ export async function runCli(argv: string[], io: CliEnv): Promise<number> {
       if (sub === 'show') {
         const slots = store.stagedSlots(ch.id, date(values.from), date(values.to));
         if (slots.length === 0) io.out('Nothing is staged.');
+        const check = slots.length === 0 ? undefined : await stageCheck({ store, client: reader() }, name!);
+        const troubled = new Map<number, string[]>();
+        for (const c of check?.conflicts ?? []) troubled.set(c.start, [...(troubled.get(c.start) ?? []), `CONFLICT (${c.reason}): ${c.message}`]);
+        for (const w of check?.pinProblems ?? []) {
+          const slot = slots.find((x) => w.at >= x.start && w.at < x.end);
+          if (slot) troubled.set(slot.start, [...(troubled.get(slot.start) ?? []), `${w.severity.toUpperCase()}: ${w.message}`]);
+        }
         for (const s of slots) {
           io.out(`${inZone(s.start, zone)} to ${inZone(s.end, zone)}  ${s.slotId ? slotLabel(s.slotId) : 'added'} ${s.pool ?? ''}${s.locked ? '  [locked]' : ''}  ${s.planned.programs.length} program(s)${Object.keys(s.pins).length ? `  pinned: ${Object.entries(s.pins).map(([n, p]) => `block ${n} = ${p.title}`).join(', ')}` : ''}`);
+          for (const t of troubled.get(s.start) ?? []) io.out(`    ${t}`);
         }
         store.close();
         return 0;

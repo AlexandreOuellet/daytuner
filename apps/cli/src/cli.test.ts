@@ -253,6 +253,19 @@ describe('the command line', () => {
     expect(said()).not.toContain('pinned:');
   });
 
+  it('shows in `stage show` what the next commit would find wrong', async () => {
+    await run('channel', 'add', join(dir, 'test.yaml'));
+    await run('stage', 'Test', 'generate', '--to', '2026-11-20', '--keep', '2026-11-18..2026-11-20');
+    await run('stage', 'Test', 'lock', '2026-11-18T20:00');
+    out.length = 0;
+    await run('stage', 'Test', 'show');
+    expect(said()).not.toContain('CONFLICT');
+    for (const m of fake.data.movies) m.duration += 1000; // the library changed under the locked slot
+    out.length = 0;
+    await run('stage', 'Test', 'show');
+    expect(said()).toMatch(/2026-11-18 20:00 to [^\n]*\[locked\][^\n]*\n    CONFLICT \(duration-changed\)/);
+  });
+
   it('previews without a store', async () => {
     expect(await run('preview', join(dir, 'test.yaml'), '--days', '2', '--from', '2026-11-09T00:00:00Z')).toBe(0);
     expect(said()).toContain('grid accuracy');

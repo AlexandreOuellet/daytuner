@@ -287,6 +287,37 @@ export async function stageGenerate(
   return { kept, planned: result.slots.length, warnings: result.warnings.filter((w) => kept.some((k) => w.at >= k.start && w.at < k.end)), titles };
 }
 
+export interface StageCheck {
+  /** Locked slots the next commit could not keep as stored. */
+  conflicts: LockConflict[];
+  /** Pins that do not fit, or were dropped, as the next commit would plan them. */
+  pinProblems: PlanWarning[];
+  titles: Record<string, string>;
+}
+
+/**
+ * What the next commit would find wrong with the staged slots, without writing anything: plans from the
+ * end of the committed lineup through the last staged slot with the locks and pins, and reports the lock
+ * conflicts and the pin problems.
+ */
+export async function stageCheck(deps: Pick<WorkerDeps, 'store' | 'client'>, channelName: string): Promise<StageCheck> {
+  const { store, client } = deps;
+  const ch = store.channel(channelName);
+  if (!ch) throw new ConsistencyError(`no channel named "${channelName}" in the store`);
+  const staged = store.stagedSlots(ch.id);
+  if (staged.length === 0) return { conflicts: [], pinProblems: [], titles: {} };
+  const { schedule, library, titles } = await resolveSchedule(parseScheduleFile(ch.schedule), client);
+  const { from } = alignToGrid(ch.edge, schedule.grid);
+  const { locked, pins } = stagedInputs(store, ch, from, library, titles);
+  const to = Math.max(...staged.map((s) => s.start)) + 1;
+  const result = plan({ schedule, library, state: ch.state, from, to, locked, pins });
+  return {
+    conflicts: result.conflicts,
+    pinProblems: result.warnings.filter((w) => w.code === 'pin-does-not-fit' || w.code === 'pin-dropped'),
+    titles,
+  };
+}
+
 export interface SequenceInfo {
   /** The key the store uses for this ordered pool's place. */
   key: string;

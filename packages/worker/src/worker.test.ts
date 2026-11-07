@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { emptyPlanState } from '@daytuner/engine';
 import { Store } from '@daytuner/store';
 import { FakeTunarr, TunarrClient } from '@daytuner/tunarr-client';
-import { adjustCursor, adoptHistory, stageGenerate, ConsistencyError, listSequences, resync, topUp, type WorkerDeps } from './worker.js';
+import { adjustCursor, adoptHistory, stageCheck, stageGenerate, ConsistencyError, listSequences, resync, topUp, type WorkerDeps } from './worker.js';
 
 const DAY = 86_400_000;
 const MIN = 60_000;
@@ -424,6 +424,31 @@ describe('pins on staged slots', () => {
     expect(r.action).toBe('appended');
     expect(r.planned!.find((x) => x.start === movieSlot.start)!.programs[0]).toBe('special');
     expect(s.fake.lineup.some((i) => i['type'] === 'content' && i['id'] === 'special')).toBe(true);
+  });
+});
+
+describe('checking staged slots before a commit', () => {
+  it('reports lock conflicts and pin problems without writing anything', async () => {
+    const s = setup();
+    const edge = s.store.channel('Test')!.edge;
+    const staged = await stageGenerate(s.deps, 'Test', { to: edge + 3 * DAY });
+    expect(await stageCheck(s.deps, 'Test')).toMatchObject({ conflicts: [], pinProblems: [] });
+
+    const movies = staged.kept.filter((k) => k.pool === 'movies');
+    s.store.setLocked('Test', movies[1]!.start, true);
+    s.fake.data.movies.push({ id: 'epic', title: 'Epic', duration: 13 * 3_600_000, genres: ['Drama'] });
+    s.store.setPin('Test', movies[2]!.start, 1, { id: 'epic', title: 'Epic', duration: 13 * 3_600_000 });
+    for (const m of s.fake.data.movies) if (m.id !== 'epic') m.duration += 1000;
+
+    const before = JSON.stringify([s.store.channel('Test'), s.store.stagedSlots(s.store.channel('Test')!.id)]);
+    const check = await stageCheck(s.deps, 'Test');
+    expect(check.conflicts.map((c) => [c.start, c.reason])).toEqual([[movies[1]!.start, 'duration-changed']]);
+    expect(check.pinProblems.map((w) => w.code)).toEqual(['pin-does-not-fit']);
+    expect(JSON.stringify([s.store.channel('Test'), s.store.stagedSlots(s.store.channel('Test')!.id)])).toBe(before);
+  });
+
+  it('has nothing to report when nothing is staged', async () => {
+    expect(await stageCheck(setup().deps, 'Test')).toEqual({ conflicts: [], pinProblems: [], titles: {} });
   });
 });
 
