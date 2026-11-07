@@ -35,7 +35,7 @@ const USAGE = `Usage:
   daytuner preview <channel.yaml> [--from ISO] [--days N] [--seed N]
   daytuner channel add <channel.yaml> [--channel NAME] [--seed N] [--floor 7d] [--step 24h]
   daytuner channel set-schedule <name> <channel.yaml>
-  daytuner channel list | status <name> | resync <name> [--yes]
+  daytuner channel list | status <name> | commits <name> | resync <name> [--yes]
   daytuner run <name> [--yes]            (a dry run without --yes)
   daytuner cursor <name> list | rewind <sequence> <k> | set <sequence> <episode-number>
 Common: --tunarr URL (or TUNARR_URL)  --db FILE (or DAYTUNER_DB, default state/daytuner.db)`;
@@ -130,6 +130,17 @@ export async function runCli(argv: string[], io: CliEnv): Promise<number> {
         store.close();
         return 0;
       }
+      if (sub === 'commits' && a) {
+        const store = openStore();
+        const ch = store.channel(a);
+        if (!ch) throw new Error(`no channel named "${a}"`);
+        const zone = parseScheduleFile(ch.schedule).timezone;
+        const all = store.commits(ch.id, 20);
+        io.out(all.length === 0 ? 'No commits yet.' : all.map((c) => `commit ${c.id} ${c.status}: ${c.slots.length} slots, ${c.items} items, ${dayLabel(c.totalMs)}, ${inZone(c.fromEdge, zone)} to ${inZone(c.toEdge, zone)}${c.note ? `\n  note: ${c.note}` : ''}`).join('\n'));
+        if (store.pendingCommit(ch.id)) io.out(`\nA commit is pending. \`channel resync ${a}\` shows how it would be settled; add --yes to settle it.`);
+        store.close();
+        return 0;
+      }
       if (sub === 'status' && a) {
         const store = openStore();
         const ch = store.channel(a);
@@ -140,7 +151,7 @@ export async function runCli(argv: string[], io: CliEnv): Promise<number> {
         const zone = parseScheduleFile(ch.schedule).timezone;
         io.out(`${ch.name}: lineup ends ${inZone(edge, zone)} (${dayLabel(edge - now)} ahead; floor ${dayLabel(ch.floorMs)} + step ${dayLabel(ch.stepMs)})`);
         io.out(Math.abs(edge - ch.edge) <= 1 ? 'The store and Tunarr agree about where it ends.' : `WARNING: the store recorded ${inZone(ch.edge, zone)}. The channel was changed outside DayTuner; the worker will refuse to write.`);
-        if (store.pendingCommit(ch.id)) io.out('A commit is pending from an earlier run; the next run settles it.');
+        if (store.pendingCommit(ch.id)) io.out(`A commit is pending from an earlier run (see \`channel commits ${a}\`); the next run settles it, or \`channel resync ${a}\` explains why it cannot.`);
         for (const c of store.commits(ch.id, 5)) io.out(`  commit ${c.id} ${c.status}: ${c.items} items, ${dayLabel(c.totalMs)}, ${inZone(c.fromEdge, zone)} to ${inZone(c.toEdge, zone)}`);
         for (const x of store.adjustments(ch.id, 5)) io.out(`  adjustment ${x.id}: ${x.sequenceKey} ${x.kind} ${x.amount} (position ${x.positionBefore} to ${x.positionAfter})`);
         store.close();

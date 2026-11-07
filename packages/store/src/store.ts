@@ -53,6 +53,8 @@ export interface CommitRecord {
   slots: SlotSummary[];
   startedAt: number;
   finishedAt: number | null;
+  /** Why a commit was left pending or abandoned, when known (for example what verification found). */
+  note: string | null;
 }
 
 export interface NewCommit {
@@ -154,6 +156,7 @@ function commitOf(r: Row): CommitRecord {
     slots: JSON.parse(String(r['slots'])) as SlotSummary[],
     startedAt: Number(r['started_at']),
     finishedAt: r['finished_at'] === null ? null : Number(r['finished_at']),
+    note: r['note'] === null || r['note'] === undefined ? null : String(r['note']),
   };
 }
 
@@ -165,6 +168,9 @@ export class Store {
     const db = new DatabaseSync(path);
     db.exec('pragma journal_mode = wal; pragma foreign_keys = on;');
     db.exec(SCHEMA);
+    // A database made before commits had notes gets the column.
+    const cols = db.prepare('pragma table_info(commits)').all() as { name: string }[];
+    if (!cols.some((c) => c.name === 'note')) db.exec('alter table commits add column note text');
     return new Store(db);
   }
 
@@ -242,6 +248,12 @@ export class Store {
         .run(c.channelId, c.fromEdge, c.toEdge, JSON.stringify(c.state), c.items, c.totalMs, JSON.stringify(c.slots), c.at);
       return commitOf(this.db.prepare('select * from commits where id = ?').get(Number(r.lastInsertRowid)) as Row);
     });
+  }
+
+  /** Attaches a note to a commit, for the person who has to look at it later. */
+  noteCommit(commitId: number, note: string): void {
+    const r = this.db.prepare('update commits set note = ? where id = ?').run(note, commitId);
+    if (Number(r.changes) === 0) throw new StoreError(`no commit ${commitId}`);
   }
 
   /** The append happened: the channel's state and edge move to the commit's, in one step. */

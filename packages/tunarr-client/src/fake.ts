@@ -19,6 +19,8 @@ export class FakeTunarr {
   crashAfterNextAppend = false;
   /** The next append is not stored and the call fails. */
   dropNextAppend = false;
+  /** The next append is stored with its first two items' durations swapped: same total, different content. */
+  corruptNextAppend = false;
   /** The channel start time reported, changeable to simulate a change made in Tunarr itself. */
   constructor(readonly data: FakeData) {
     this.lineup = [...(data.lineup ?? [])];
@@ -50,7 +52,11 @@ export class FakeTunarr {
       const items = body['lineup'] as Record<string, unknown>[];
       for (const i of items) if (!Number.isInteger(i['duration'])) return json({ error: `duration ${String(i['duration'])} is not whole` }, 400);
       if (this.dropNextAppend) { this.dropNextAppend = false; return json({ error: 'connection dropped' }, 500); }
-      this.lineup.push(...items);
+      if (this.corruptNextAppend && items.length >= 2) {
+        this.corruptNextAppend = false;
+        const [a, b, ...more] = items as [Record<string, unknown>, Record<string, unknown>, ...Record<string, unknown>[]];
+        this.lineup.push({ ...a, duration: b['duration'] }, { ...b, duration: a['duration'] }, ...more);
+      } else this.lineup.push(...items);
       if (this.crashAfterNextAppend) { this.crashAfterNextAppend = false; return json({ error: 'connection dropped after storing' }, 500); }
       return json(null);
     }

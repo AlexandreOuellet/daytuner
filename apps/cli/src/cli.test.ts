@@ -136,6 +136,23 @@ describe('the command line', () => {
     expect(said()).toMatch(/Appended: \d+ slots/);
   });
 
+  it('lists commits and shows why one is pending', async () => {
+    await run('channel', 'add', join(dir, 'test.yaml'));
+    fake.corruptNextAppend = true;
+    expect(await run('run', 'Test', '--yes')).toBe(3);
+    out.length = 0;
+    expect(await run('channel', 'commits', 'Test')).toBe(0);
+    expect(said()).toMatch(/commit 1 pending: \d+ slots/);
+    expect(said()).toContain('note: verification failed');
+    expect(said()).toContain('A commit is pending');
+    out.length = 0;
+    expect(await run('channel', 'resync', 'Test', '--yes')).toBe(0);
+    expect(said()).toContain('differs from the plan');
+    out.length = 0;
+    await run('channel', 'commits', 'Test');
+    expect(said()).toMatch(/commit 1 done/);
+  });
+
   it('previews without a store', async () => {
     expect(await run('preview', join(dir, 'test.yaml'), '--days', '2', '--from', '2026-11-09T00:00:00Z')).toBe(0);
     expect(said()).toContain('grid accuracy');

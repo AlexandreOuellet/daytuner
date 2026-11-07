@@ -248,6 +248,24 @@ describe('a missed week', () => {
   });
 });
 
+describe('a verified append that does not match', () => {
+  it('leaves the commit pending with a note, and resync reports it and marks the state stale', async () => {
+    const s = setup();
+    s.fake.corruptNextAppend = true;
+    await expect(topUp(s.deps, 'Test')).rejects.toThrow(/stored something different/);
+    const ch = s.store.channel('Test')!;
+    const pending = s.store.pendingCommit(ch.id)!;
+    expect(pending.note).toMatch(/^verification failed/);
+    const r = await resync(s.deps, 'Test', { dryRun: true });
+    expect(r.found.join('\n')).toMatch(/has a note: verification failed/);
+    expect(r.actions[0]).toMatch(/what it holds differs from the plan/);
+    expect(r.stateMayBeStale).toBe(true);
+    await resync(s.deps, 'Test');
+    expect(s.store.pendingCommit(ch.id)).toBeUndefined();
+    expect((await topUp(s.deps, 'Test')).action).toBe('none');
+  });
+});
+
 describe('resync', () => {
   it('adopts Tunarr\'s end after a change made outside DayTuner, so the worker can carry on', async () => {
     const s = setup();

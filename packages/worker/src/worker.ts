@@ -138,7 +138,9 @@ export async function topUp(deps: WorkerDeps, channelName: string, opts: TopUpOp
     throw e;
   }
   if (!report.ok) {
-    throw new ConsistencyError(`Tunarr stored something different from what was sent (${report.problems.join('; ')}). The commit stays pending for inspection.`);
+    const what = report.problems.join('; ');
+    store.noteCommit(commit.id, `verification failed: ${what}`);
+    throw new ConsistencyError(`Tunarr stored something different from what was sent (${what}). The commit stays pending; see \`channel commits ${channelName}\` and \`channel resync ${channelName}\`.`);
   }
   store.completeCommit(commit.id, report.edgeAfter, clock.now());
   return {
@@ -181,8 +183,16 @@ export async function resync(deps: WorkerDeps, channelName: string, opts: { dryR
   const pending = store.pendingCommit(ch.id);
   if (pending) {
     report.found.push(`commit ${pending.id} is pending (it was to take the lineup from ${pending.fromEdge} to ${pending.toEdge})`);
+    if (pending.note) {
+      report.found.push(`commit ${pending.id} has a note: ${pending.note}`);
+      if (same(edgeNow, pending.toEdge)) report.stateMayBeStale = true;
+    }
     if (same(edgeNow, pending.toEdge)) {
-      report.actions.push(`complete commit ${pending.id}: Tunarr already has what it wrote`);
+      report.actions.push(
+        pending.note
+          ? `complete commit ${pending.id}: the lineup reaches where it should end, but what it holds differs from the plan (see the note)`
+          : `complete commit ${pending.id}: Tunarr already has what it wrote`,
+      );
       if (!dry) store.completeCommit(pending.id, edgeNow, clock.now());
       return report;
     }

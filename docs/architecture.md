@@ -161,7 +161,9 @@ It only appends. It never touches the past, the present or anything already comm
   After the append it reads Tunarr back and confirms it. If it crashed in between, the next run
   compares Tunarr's real end with the pending record: equal to the new end means the append
   happened and the record is completed; equal to the old end means it did not and the record is
-  dropped; anything else is reported and nothing is written.
+  dropped; anything else is reported and nothing is written. If the read-back differs from what was
+  sent, the commit stays pending with a note saying what differed (`channel commits` shows it), and
+  `channel resync` settles it, marking the planner state as possibly stale.
 - The commit log records every commit: when, the span it covers, the items written and the slots.
 
 **CLI** (`apps/cli`) does the same planning on demand: `preview` prints the metrics for a

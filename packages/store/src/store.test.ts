@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { PlanState } from '@daytuner/engine';
 import { Store, StoreError, type NewChannel } from './store.js';
@@ -145,5 +146,38 @@ describe('cursor adjustments', () => {
     expect(store.channel('funny')!.state.sequences['seq:office']).toEqual({ position: 4, history: 4 });
     expect(() => store.applyAdjustment('ghost', { at: 1, sequenceKey: 'x', kind: 'set', amount: 0, positionBefore: 0, next: { position: 0, history: 0 } })).toThrow(/no channel/);
     store.close();
+  });
+});
+
+describe('commit notes', () => {
+  const state: PlanState = { rng: 1, sequences: {}, bags: {} } as unknown as PlanState;
+
+  it('keeps a note on a commit', () => {
+    const s = Store.open(':memory:');
+    const ch = s.addChannel({ name: 'A', tunarrId: 't', floorMs: 1, stepMs: 1, schedule: '', state, edge: 0 });
+    const c = s.beginCommit({ channelId: ch.id, fromEdge: 0, toEdge: 10, state, items: 1, totalMs: 10, slots: [], at: 1 });
+    expect(c.note).toBeNull();
+    s.noteCommit(c.id, 'why');
+    expect(s.pendingCommit(ch.id)!.note).toBe('why');
+    expect(() => s.noteCommit(999, 'x')).toThrow(/no commit/);
+  });
+
+  it('upgrades a database made before commits had notes', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'daytuner-'));
+    try {
+      const path = join(dir, 'old.db');
+      const old = new DatabaseSync(path);
+      old.exec(`create table commits (id integer primary key autoincrement, channel_id integer not null, status text not null,
+        from_edge real not null, to_edge real not null, state text not null, items integer not null, total_ms integer not null,
+        slots text not null, started_at integer not null, finished_at integer);`);
+      old.close();
+      const s = Store.open(path);
+      s.close();
+      const check = new DatabaseSync(path);
+      expect((check.prepare('pragma table_info(commits)').all() as { name: string }[]).some((c) => c.name === 'note')).toBe(true);
+      check.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
