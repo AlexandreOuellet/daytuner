@@ -36,11 +36,11 @@ describe('channels', () => {
 
   it('replaces the schedule and the state by hand', () => {
     store.addChannel(channel());
-    store.setSchedule('funny', 'channel: funny\ngrid: 15m\n');
+    store.setSchedule('funny', 'channel: funny\ngrid: 15m\n', 5);
     store.setState('funny', state(9, 3));
     expect(store.channel('funny')!.schedule).toContain('grid');
     expect(store.channel('funny')!.state).toEqual(state(9, 3));
-    expect(() => store.setSchedule('ghost', 'x')).toThrow(/no channel/);
+    expect(() => store.setSchedule('ghost', 'x', 1)).toThrow(/no channel/);
   });
 });
 
@@ -176,6 +176,60 @@ describe('commit notes', () => {
       const check = new DatabaseSync(path);
       expect((check.prepare('pragma table_info(commits)').all() as { name: string }[]).some((c) => c.name === 'note')).toBe(true);
       check.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('schedule revisions', () => {
+  let store: Store;
+  beforeEach(() => { store = Store.open(':memory:'); });
+  afterEach(() => store.close());
+
+  it('starts at revision 1 and numbers each save', () => {
+    const c = store.addChannel(channel({ at: 10 }));
+    expect(c.revision).toBe(1);
+    expect(store.setSchedule('funny', 'v2\n', 20)).toBe(2);
+    expect(store.setSchedule('funny', 'v3\n', 30)).toBe(3);
+    expect(store.channel('funny')).toMatchObject({ revision: 3, schedule: 'v3\n' });
+    expect(store.revisions(c.id).map((r) => [r.number, r.savedAt, r.yaml])).toEqual([
+      [1, 10, 'channel: funny\n'], [2, 20, 'v2\n'], [3, 30, 'v3\n'],
+    ]);
+  });
+
+  it('does not make a revision when the text is unchanged', () => {
+    const c = store.addChannel(channel());
+    expect(store.setSchedule('funny', 'channel: funny\n', 5)).toBe(1);
+    expect(store.revisions(c.id)).toHaveLength(1);
+  });
+
+  it('goes back to an earlier revision, keeps the history, and numbers the next save after the last', () => {
+    const c = store.addChannel(channel());
+    store.setSchedule('funny', 'v2\n', 2);
+    store.setSchedule('funny', 'v3\n', 3);
+    store.useRevision('funny', 1);
+    expect(store.channel('funny')).toMatchObject({ revision: 1, schedule: 'channel: funny\n' });
+    expect(store.revisions(c.id)).toHaveLength(3);
+    expect(store.setSchedule('funny', 'v4\n', 4)).toBe(4);
+    expect(() => store.useRevision('funny', 9)).toThrow(/no revision 9/);
+    expect(() => store.useRevision('ghost', 1)).toThrow(/no channel/);
+  });
+
+  it('gives a database made before revisions its schedule as revision 1', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'daytuner-'));
+    try {
+      const path = join(dir, 'old.db');
+      const old = new DatabaseSync(path);
+      old.exec(`create table channels (id integer primary key autoincrement, name text not null unique, tunarr_id text not null,
+        floor_ms integer not null, step_ms integer not null, schedule text not null, state text not null, edge real not null);`);
+      old.prepare("insert into channels (name, tunarr_id, floor_ms, step_ms, schedule, state, edge) values ('old', 't', 1, 1, 'yaml\n', '{}', 0)").run();
+      old.close();
+      const s = Store.open(path);
+      const c = s.channel('old')!;
+      expect(c.revision).toBe(1);
+      expect(s.revisions(c.id).map((r) => [r.number, r.yaml])).toEqual([[1, 'yaml\n']]);
+      s.close();
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

@@ -12,10 +12,10 @@ are in [`roadmap.md`](roadmap.md); verified Tunarr facts are in [`tunarr-api.md`
 | 1 Engine | done | Time and grid, breaks, blocks, pools, clips, `plan()`, metrics. 137 tests, a golden test |
 | 2 Client and CLI | done | Reads the library, appends verified lineups, `preview`. Run end to end on the test copy |
 | 3 State and worker | built, not fully verified | SQLite store, safe top-up worker, `channel`, `run`, `cursor` commands. Run end to end on the test copy. Ad and filler playback and the media server's guide not checked |
-| 4 Schedules and staging | not started | Needs design first |
+| 4 Schedules and staging | started | Design settled (architecture.md, "Phase 4 storage"). Revisions built; staged slots, pins, locks, conflicts and the preview diff to build |
 | 5 Web interface | not started | Needs design first |
 
-Tests: 242 pass across the engine, client, store, schedule, worker and CLI, plus 3 client integration
+Tests: 248 pass across the engine, client, store, schedule, worker and CLI, plus 3 client integration
 tests that run only against a real Tunarr (`TUNARR_URL`).
 
 ## Needed for 1.0
@@ -32,8 +32,8 @@ Nothing is pushed publicly until all of this is done (see the roadmap).
 - [-] Synthetic multi-year lineup: the owner decided not to run it
 
 **Phase 4: schedules and staging**
-- [ ] Schedules in the store with revisions and rollback (today: one stored copy of the YAML)
-- [ ] Saving a revision dry-runs it against the locked staged slots and lists those that no longer fit
+- [x] Schedules in the store with revisions, a diff and rollback (`channel set-schedule`, `revisions`, `diff`, `rollback`)
+- [ ] Saving a revision dry-runs it against the locked staged slots and lists those that no longer fit (needs staged slots first)
 - [ ] Staging: generate into staging, edit, preview the difference with what is committed, commit
 - [ ] Pins, locks and conflicts in the engine (anchored planning is done)
 - [ ] YAML export (import exists as `channel add` and `channel set-schedule`)

@@ -221,7 +221,7 @@ variables or secrets.
   regenerated, and a conflict is recorded in the commit log with the reason (cursor moved, grid
   changed, program gone). The preview shows it before the commit. Nothing blocks the worker, so the
   floor is never missed.
-- **Revisions.** Each save stores the full YAML with a number and a time. The channel points at one
+- **Revisions** (built). Each save stores the full YAML with a number and a time. The channel points at one
   current revision. Rollback is picking an older number. A diff is a text diff of the YAML plus a diff
   of the planned slots in the staged range.
 - **Revision and locks.** Saving a revision dry-runs it against the locked staged slots and lists

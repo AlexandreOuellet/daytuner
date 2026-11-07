@@ -14,8 +14,10 @@ export interface ChannelRecord {
   floorMs: number;
   /** How much one worker run adds. */
   stepMs: number;
-  /** The YAML text of the channel file. */
+  /** The YAML text of the current revision of the channel file. */
   schedule: string;
+  /** The number of the current revision (1 for the first). */
+  revision: number;
   state: PlanState;
   /** Where the committed lineup ends, as Tunarr reported it (it can carry a fraction). */
   edge: number;
@@ -29,6 +31,16 @@ export interface NewChannel {
   schedule: string;
   state: PlanState;
   edge: number;
+  /** When the channel is added; recorded as the first revision's time. */
+  at?: number;
+}
+
+/** One saved version of a channel's schedule. Revisions are never edited or removed. */
+export interface RevisionRecord {
+  channelId: number;
+  number: number;
+  yaml: string;
+  savedAt: number;
 }
 
 export type CommitStatus = 'pending' | 'done' | 'abandoned';
@@ -96,8 +108,16 @@ create table if not exists channels (
   floor_ms integer not null,
   step_ms integer not null,
   schedule text not null,
+  revision integer not null default 1,
   state text not null,
   edge real not null
+);
+create table if not exists revisions (
+  channel_id integer not null references channels(id),
+  number integer not null,
+  yaml text not null,
+  saved_at integer not null,
+  primary key (channel_id, number)
 );
 create table if not exists commits (
   id integer primary key autoincrement,
@@ -138,6 +158,7 @@ function channelOf(r: Row): ChannelRecord {
     floorMs: Number(r['floor_ms']),
     stepMs: Number(r['step_ms']),
     schedule: String(r['schedule']),
+    revision: Number(r['revision']),
     state: JSON.parse(String(r['state'])) as PlanState,
     edge: Number(r['edge']),
   };
@@ -171,6 +192,10 @@ export class Store {
     // A database made before commits had notes gets the column.
     const cols = db.prepare('pragma table_info(commits)').all() as { name: string }[];
     if (!cols.some((c) => c.name === 'note')) db.exec('alter table commits add column note text');
+    // A database made before revisions: its schedule becomes revision 1, saved at time 0 (unknown).
+    const chCols = db.prepare('pragma table_info(channels)').all() as { name: string }[];
+    if (!chCols.some((c) => c.name === 'revision')) db.exec('alter table channels add column revision integer not null default 1');
+    db.exec('insert into revisions (channel_id, number, yaml, saved_at) select id, 1, schedule, 0 from channels where id not in (select channel_id from revisions)');
     return new Store(db);
   }
 
@@ -192,15 +217,20 @@ export class Store {
 
   addChannel(c: NewChannel): ChannelRecord {
     if (!(c.floorMs > 0) || !(c.stepMs > 0)) throw new StoreError('floor and step must be positive');
-    try {
-      this.db
-        .prepare('insert into channels (name, tunarr_id, floor_ms, step_ms, schedule, state, edge) values (?, ?, ?, ?, ?, ?, ?)')
-        .run(c.name, c.tunarrId, c.floorMs, c.stepMs, c.schedule, JSON.stringify(c.state), c.edge);
-    } catch (e) {
-      if (String(e).includes('UNIQUE')) throw new StoreError(`a channel named "${c.name}" already exists`);
-      throw e;
-    }
-    return this.channel(c.name)!;
+    return this.tx(() => {
+      let id: number;
+      try {
+        const r = this.db
+          .prepare('insert into channels (name, tunarr_id, floor_ms, step_ms, schedule, revision, state, edge) values (?, ?, ?, ?, ?, 1, ?, ?)')
+          .run(c.name, c.tunarrId, c.floorMs, c.stepMs, c.schedule, JSON.stringify(c.state), c.edge);
+        id = Number(r.lastInsertRowid);
+      } catch (e) {
+        if (String(e).includes('UNIQUE')) throw new StoreError(`a channel named "${c.name}" already exists`);
+        throw e;
+      }
+      this.db.prepare('insert into revisions (channel_id, number, yaml, saved_at) values (?, 1, ?, ?)').run(id, c.schedule, c.at ?? 0);
+      return this.channel(c.name)!;
+    });
   }
 
   channel(name: string): ChannelRecord | undefined {
@@ -212,9 +242,39 @@ export class Store {
     return this.db.prepare('select * from channels order by name').all().map((r) => channelOf(r as Row));
   }
 
-  setSchedule(name: string, schedule: string): void {
-    const r = this.db.prepare('update channels set schedule = ? where name = ?').run(schedule, name);
-    if (Number(r.changes) === 0) throw new StoreError(`no channel named "${name}"`);
+  /**
+   * Saves a new revision of a channel's schedule and makes it current. Saving the text that is already
+   * current does nothing. Returns the number of the current revision afterwards.
+   */
+  setSchedule(name: string, schedule: string, at: number): number {
+    return this.tx(() => {
+      const ch = this.channel(name);
+      if (!ch) throw new StoreError(`no channel named "${name}"`);
+      if (ch.schedule === schedule) return ch.revision;
+      const last = this.db.prepare('select max(number) as n from revisions where channel_id = ?').get(ch.id) as { n: number };
+      const number = last.n + 1;
+      this.db.prepare('insert into revisions (channel_id, number, yaml, saved_at) values (?, ?, ?, ?)').run(ch.id, number, schedule, at);
+      this.db.prepare('update channels set schedule = ?, revision = ? where id = ?').run(schedule, number, ch.id);
+      return number;
+    });
+  }
+
+  /** Makes an earlier revision current again. History is kept; the next save gets the next number. */
+  useRevision(name: string, number: number): void {
+    this.tx(() => {
+      const ch = this.channel(name);
+      if (!ch) throw new StoreError(`no channel named "${name}"`);
+      const rev = this.db.prepare('select * from revisions where channel_id = ? and number = ?').get(ch.id, number) as Row | undefined;
+      if (!rev) throw new StoreError(`"${name}" has no revision ${number}`);
+      this.db.prepare('update channels set schedule = ?, revision = ? where id = ?').run(String(rev['yaml']), number, ch.id);
+    });
+  }
+
+  revisions(channelId: number): RevisionRecord[] {
+    return this.db
+      .prepare('select * from revisions where channel_id = ? order by number')
+      .all(channelId)
+      .map((r) => ({ channelId, number: Number((r as Row)['number']), yaml: String((r as Row)['yaml']), savedAt: Number((r as Row)['saved_at']) }));
   }
 
   /** Replaces a channel's state by hand (a cursor adjustment). It does not move the edge. */

@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -170,6 +170,33 @@ describe('the command line', () => {
     out.length = 0;
     await run('cursor', 'Test', 'list');
     expect(said()).toContain('next episode 8 of');
+  });
+
+  it('keeps revisions of the schedule, shows what changed, and goes back', async () => {
+    const original = readFileSync(join(dir, 'test.yaml'), 'utf8');
+    await run('channel', 'add', join(dir, 'test.yaml'));
+    writeFileSync(join(dir, 'v2.yaml'), original.replace('ratio: { min: 15%', 'ratio: { min: 20%'));
+    out.length = 0;
+    expect(await run('channel', 'set-schedule', 'Test', join(dir, 'v2.yaml'))).toBe(0);
+    expect(said()).toContain('Saved revision 2');
+    out.length = 0;
+    await run('channel', 'set-schedule', 'Test', join(dir, 'v2.yaml'));
+    expect(said()).toContain('unchanged (still revision 2)');
+    out.length = 0;
+    await run('channel', 'revisions', 'Test');
+    expect(said()).toMatch(/revision 1[^\n]*\n\* revision 2/);
+    out.length = 0;
+    await run('channel', 'diff', 'Test');
+    expect(said()).toContain('Revision 1 to revision 2');
+    expect(said()).toMatch(/- .*min: 15%/);
+    expect(said()).toMatch(/\+ .*min: 20%/);
+    out.length = 0;
+    expect(await run('channel', 'rollback', 'Test', '1')).toBe(0);
+    expect(said()).toContain('Revision 1 of "Test" is now current');
+    out.length = 0;
+    await run('channel', 'revisions', 'Test');
+    expect(said()).toMatch(/\* revision 1[^\n]*\n  revision 2/);
+    expect(await run('channel', 'rollback', 'Test', '7')).not.toBe(0);
   });
 
   it('previews without a store', async () => {

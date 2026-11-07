@@ -17,7 +17,7 @@ import { dirname } from 'node:path';
 import { parseArgs } from 'node:util';
 import { alignToGrid, TunarrClient, type FetchLike } from '@daytuner/tunarr-client';
 import { ceilToGrid, computeMetrics, DAY, emptyPlanState, plan, type Clock } from '@daytuner/engine';
-import { parseDuration, parseScheduleFile, resolveSchedule } from '@daytuner/schedule';
+import { diffLines, formatDiff, parseDuration, parseScheduleFile, resolveSchedule } from '@daytuner/schedule';
 import { Store } from '@daytuner/store';
 import { adjustCursor, adoptHistory, ConsistencyError, listSequences, placesFromLineup, resync, topUp } from '@daytuner/worker';
 import { formatMetrics, formatWarnings, inZone } from './format.js';
@@ -34,7 +34,8 @@ export interface CliEnv {
 const USAGE = `Usage:
   daytuner preview <channel.yaml> [--from ISO] [--days N] [--seed N]
   daytuner channel add <channel.yaml> [--channel NAME] [--seed N] [--floor 7d] [--step 24h]
-  daytuner channel set-schedule <name> <channel.yaml>
+  daytuner channel set-schedule <name> <channel.yaml>      (saves a new revision)
+  daytuner channel revisions <name> | diff <name> [from [to]] | rollback <name> <number>
   daytuner channel list | status <name> | commits <name> | adopt-history <name> [--yes] | resync <name> [--yes]
   daytuner run <name> [--yes]            (a dry run without --yes)
   daytuner cursor <name> list | rewind <sequence> <k> | set <sequence> <episode-number>
@@ -98,7 +99,7 @@ export async function runCli(argv: string[], io: CliEnv): Promise<number> {
         const store = openStore();
         const added = store.addChannel({
           name: parsed.channel, tunarrId: ch.id, floorMs: parseDuration(values.floor), stepMs: parseDuration(values.step),
-          schedule: text, state: emptyPlanState(Number(values.seed)), edge: ch.startTime + ch.duration,
+          schedule: text, state: emptyPlanState(Number(values.seed)), edge: ch.startTime + ch.duration, at: io.clock.now(),
         });
         io.out(`Added channel "${added.name}" (Tunarr channel "${ch.name}"). Its lineup ends ${inZone(added.edge, parsed.timezone)}; floor ${dayLabel(added.floorMs)}, step ${dayLabel(added.stepMs)}.`);
         for (const n of resolved.notes) io.out(`note: ${n}`);
@@ -118,8 +119,52 @@ export async function runCli(argv: string[], io: CliEnv): Promise<number> {
         const text = readFileSync(b, 'utf8');
         await resolveSchedule(parseScheduleFile(text), reader());
         const store = openStore();
-        store.setSchedule(a, text);
-        io.out(`Replaced the schedule of "${a}". It takes effect at the next run.`);
+        const before = store.channel(a);
+        const number = store.setSchedule(a, text, io.clock.now());
+        io.out(before && number === before.revision ? `The schedule of "${a}" is unchanged (still revision ${number}).` : `Saved revision ${number} of the schedule of "${a}". It takes effect at the next run.`);
+        store.close();
+        return 0;
+      }
+      if (sub === 'revisions' && a) {
+        const store = openStore();
+        const ch = store.channel(a);
+        if (!ch) throw new Error(`no channel named "${a}"`);
+        const zone = parseScheduleFile(ch.schedule).timezone;
+        for (const r of store.revisions(ch.id)) {
+          io.out(`${r.number === ch.revision ? '*' : ' '} revision ${r.number}  ${r.savedAt === 0 ? 'saved before revisions were kept' : inZone(r.savedAt, zone)}`);
+        }
+        io.out('* is the current one. `channel diff <name> [from] [to]` shows what changed; `channel rollback <name> <number>` makes an earlier one current.');
+        store.close();
+        return 0;
+      }
+      if (sub === 'diff' && a) {
+        const store = openStore();
+        const ch = store.channel(a);
+        if (!ch) throw new Error(`no channel named "${a}"`);
+        const revs = store.revisions(ch.id);
+        const toN = rest[3] !== undefined ? Number(rest[3]) : ch.revision;
+        const fromN = b !== undefined ? Number(b) : ch.revision - 1;
+        const find = (n: number) => revs.find((r) => r.number === n);
+        const x = find(fromN);
+        const y = find(toN);
+        if (!y) throw new Error(`"${a}" has no revision ${toN}`);
+        if (!x) throw new Error(fromN < 1 ? `revision ${toN} is the first; there is nothing before it to compare with` : `"${a}" has no revision ${fromN}`);
+        const lines = diffLines(x.yaml, y.yaml);
+        io.out(`Revision ${fromN} to revision ${toN} of "${a}":`);
+        io.out(lines.every((l) => l.kind === 'same') ? '(no difference)' : formatDiff(lines));
+        store.close();
+        return 0;
+      }
+      if (sub === 'rollback' && a && b) {
+        const store = openStore();
+        const n = Number(b);
+        if (!Number.isInteger(n)) throw new Error('give the revision number');
+        const ch = store.channel(a);
+        if (!ch) throw new Error(`no channel named "${a}"`);
+        const rev = store.revisions(ch.id).find((r) => r.number === n);
+        if (rev) parseScheduleFile(rev.yaml); // refuse a revision that no longer parses
+        store.useRevision(a, n);
+        io.out(`Revision ${n} of "${a}" is now current. It takes effect at the next run; what is already in Tunarr stays as it is. Nothing was lost: \`channel revisions ${a}\` lists them all.`);
         store.close();
         return 0;
       }
