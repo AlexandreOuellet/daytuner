@@ -42,7 +42,7 @@ Nothing is pushed publicly until all of this is done (see the roadmap).
 - [ ] The server and its architecture (designed in `web-architecture.md`, not built): TypeScript server plus React app, no login, one process and container
 - [ ] Plain configuration of ads, bumpers and filler: the main complaint about Tunarr (designed in `web-ads.md`, not built)
 - [ ] Edit schedules, preview, see what is scheduled, link to the channel in Tunarr (the schedule designer is designed in `web-schedule.md`: week grid, drag and type, a Pools panel, a calendar of special days; not built)
-- [ ] Stage a date range, edit a day in staging (delete, add, resize slots, pin programs), re-plan only what changed
+- [ ] Stage a date range, edit a day in staging (delete, add, resize slots, pin programs), re-plan only what changed (designed in `web-staging.md`: a day timeline, edits on the blocks with a search panel, reset a slot or a day; not built)
 - [ ] Cursor adjustments with a preview of which airing they change
 - [ ] Metrics dashboard: the numbers in [`metrics.md`](metrics.md) per channel and over time (the metrics
       are computed today but not stored over time)
@@ -58,7 +58,7 @@ Settled this session and recorded under Decided in the roadmap: the exception fa
 
 - **Ad and bumper interface.** Decided: a block drawn in order, a live sample from the real library, simple first with details on request, saved as a new schedule revision. See [`web-ads.md`](web-ads.md). Open there: warning about unplayable clips, which lists to offer, where the interstitial sits in the picture.
 - **Mid-break offers** need refinement, deferred by the owner until later.
-- **Web pages still to design with the owner:** the staging editor, the cursors page and the dashboard (the ads page, the schedule designer's main view and the architecture are done).
+- **Web pages still to design with the owner:** the cursors page and the dashboard (the ads page, the staging editor, the schedule designer's main view and the architecture are done).
 - **Phase 4 design.** The staging build plan is in [`staging-design.md`](staging-design.md) (six slices; pins by block number, a lock applies its state effect, ranges in local dates). Storage, conflicts, revisions and the revision-versus-locks rule are decided (see
   `architecture.md`, "Phase 4 storage"). Still to settle when building: how staging is shown in the CLI, and the
   exact preview diff format.
