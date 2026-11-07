@@ -15,7 +15,7 @@ are in [`roadmap.md`](roadmap.md); verified Tunarr facts are in [`tunarr-api.md`
 | 4 Schedules and staging | built, verified on the test copy | Design settled (architecture.md, "Phase 4 storage"). Revisions and all six slices of staging (store, `stage generate|show|clear|lock|unlock|pin|unpin`, locked slots committed as stored, lock conflicts, pins, conflicts shown by `stage show`, `stage delete|resize|add`) built), the preview diff and the revision dry-run against locked slots built; staging was run on the test copy and a locked, a pinned and an added slot were committed and read back identical (see `tunarr-api.md`) |
 | 5 Web interface | not started | Needs design first |
 
-Tests: 326 pass across the engine, client, store, schedule, worker and CLI, plus 3 client integration
+Tests: 337 pass across the engine, client, store, schedule, worker and CLI, plus 3 client integration
 tests that run only against a real Tunarr (`TUNARR_URL`).
 
 ## Needed for 1.0
@@ -39,7 +39,7 @@ Nothing is pushed publicly until all of this is done (see the roadmap).
 - [x] YAML export (`channel export <name> [--out FILE]`: the current schedule with the library's id beside every show and movie title; import is `channel add` and `channel set-schedule`)
 
 **Phase 5: web interface**
-- [ ] The server and its architecture (designed in `web-architecture.md`, not built): TypeScript server plus React app, no login, one process and container
+- [ ] The server and its architecture (`web-architecture.md`): TypeScript server plus React app, no login, one process and container. Built so far: the Hono server, the read-only API for channels, revisions, the diff, staged slots and commits, and the job runner (`apps/web`). To build: the write endpoints (jobs for plan, stage and commit), the scheduler, the pages
 - [ ] Plain configuration of ads, bumpers and filler: the main complaint about Tunarr (designed in `web-ads.md`, not built)
 - [ ] Edit schedules, preview, see what is scheduled, link to the channel in Tunarr (the schedule designer is designed in `web-schedule.md`: week grid, drag and type, a Pools panel, a calendar of special days; not built)
 - [ ] Stage a date range, edit a day in staging (delete, add, resize slots, pin programs), re-plan only what changed (designed in `web-staging.md`: a day timeline, edits on the blocks with a search panel, reset a slot or a day; not built)
