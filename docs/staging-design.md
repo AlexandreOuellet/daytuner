@@ -85,11 +85,10 @@ daytuner stage <channel> clear [--from DATE --to DATE]
 2. **Locks (built).** Engine: staged windows, lock replay with the state effect, the validity check. Worker uses
    staged slots. `stage lock`, `unlock`. Tests: a locked slot is committed exactly as stored; the shows' places
    afterwards equal planning it normally.
-3. **Pins.** Engine `pinned` source and the pin warnings. `stage pin`, `unpin`. Tests: a pin never moves
+3. **Pins (built).** Engine `pinned` source and the pin warnings. `stage pin`, `unpin`. Tests: a pin never moves
    a cursor, never resizes the slot.
 4. **Conflicts.** The validity checks, the regeneration and the log entry came with slice 2 (reasons: `window-changed`,
-   `program-gone`, `duration-changed`, `clip-gone`). What is left: regeneration that keeps the slot's pins (needs pins), and
-   showing the conflicts a commit would record in `stage show`.
+   `program-gone`, `duration-changed`, `clip-gone`). Regeneration keeps the slot's pins (slice 3). What is left: showing the conflicts a commit would record in `stage show`.
 5. **Structure edits.** Delete, add, resize a slot; cutting the neighbours. Tests on the cut rules.
 6. **Preview diff.** What a change did to the slots around it, before commit. Revision dry-run against
    locked slots (from `architecture.md`).
@@ -102,3 +101,14 @@ daytuner stage <channel> clear [--from DATE --to DATE]
   locking a slot never changes what comes after it.
 - **The range to keep is written in local dates and times** in the channel's time zone: `2026-10-31` is that
   whole local day from midnight, `2026-10-31T20:00` an exact local time.
+
+## Choices made while building
+
+- **`stage generate` over a locked slot keeps it.** Unlocked staged slots in the range are replaced (their pins stay);
+  locked ones are used as stored. It does not refuse.
+- **A pin needs an unlocked staged slot.** Unlock it to change its pins.
+- **A pin keeps the program's length** as read when it was pinned, because the program may be in no pool. If a pool also
+  holds it, the library's length is used.
+- **Pins are written as text:** `movie:Title` or `episode:Show/Episode title`.
+- **A pin that does not fit** is an alert, and the block is planned from the pool as if there were no pin; the
+  warning says how many minutes the program lasts and how many remain.

@@ -406,6 +406,27 @@ describe('locked staged slots', () => {
   });
 });
 
+describe('pins on staged slots', () => {
+  it('are kept when the slot is committed, and a program outside every pool is added to the library', async () => {
+    const s = setup();
+    const id = s.store.channel('Test')!.id;
+    const edge = s.store.channel('Test')!.edge;
+    const staged = await stageGenerate(s.deps, 'Test', { to: edge + 3 * DAY });
+    const movieSlot = staged.kept.filter((k) => k.pool === 'movies')[1]!; // the first one may be only part of a slot
+    // A movie no pool uses: too long for the pool's filter, but short enough for the slot.
+    s.fake.data.movies.push({ id: 'special', title: 'Special', duration: 100 * MIN, genres: ['Drama'] });
+    s.store.setPin('Test', movieSlot.start, 1, { id: 'special', title: 'Special', duration: 100 * MIN });
+    const again = await stageGenerate(s.deps, 'Test', { to: movieSlot.start + 1, keepFrom: movieSlot.start, keepTo: movieSlot.start + 1 });
+    expect(again.kept[0]!.programs[0]).toBe('special');
+    expect(again.kept[0]!.blocks[0]!.pinned).toBe(true);
+    expect(s.store.stagedSlots(id, movieSlot.start, movieSlot.start + 1)[0]!.planned.programs[0]).toBe('special');
+    const r = await topUp(s.deps, 'Test');
+    expect(r.action).toBe('appended');
+    expect(r.planned!.find((x) => x.start === movieSlot.start)!.programs[0]).toBe('special');
+    expect(s.fake.lineup.some((i) => i['type'] === 'content' && i['id'] === 'special')).toBe(true);
+  });
+});
+
 describe('resync', () => {
   it('adopts Tunarr\'s end after a change made outside DayTuner, so the worker can carry on', async () => {
     const s = setup();

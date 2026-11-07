@@ -17,7 +17,7 @@ import { dirname } from 'node:path';
 import { parseArgs } from 'node:util';
 import { alignToGrid, TunarrClient, type FetchLike } from '@daytuner/tunarr-client';
 import { ceilToGrid, computeMetrics, DAY, emptyPlanState, plan, type Clock } from '@daytuner/engine';
-import { diffLines, formatDiff, parseDuration, parseLocalDateTime, parseScheduleFile, resolveSchedule } from '@daytuner/schedule';
+import { diffLines, findProgram, formatDiff, parseDuration, parseLocalDateTime, parseScheduleFile, resolveSchedule } from '@daytuner/schedule';
 import { Store } from '@daytuner/store';
 import { adjustCursor, adoptHistory, ConsistencyError, listSequences, placesFromLineup, resync, stageGenerate, topUp } from '@daytuner/worker';
 import { formatMetrics, formatWarnings, inZone, slotLabel } from './format.js';
@@ -37,7 +37,8 @@ const USAGE = `Usage:
   daytuner channel set-schedule <name> <channel.yaml>      (saves a new revision)
   daytuner channel revisions <name> | diff <name> [from [to]] | rollback <name> <number>
   daytuner channel list | status <name> | commits <name> | adopt-history <name> [--yes] | resync <name> [--yes]
-  daytuner stage <name> generate --to DATE [--keep DATE..DATE] | show [--from DATE] [--to DATE] | lock DATETIME | unlock DATETIME | clear [--from DATE] [--to DATE]
+  daytuner stage <name> generate --to DATE [--keep DATE..DATE] | show [--from DATE] [--to DATE] | lock DATETIME | unlock DATETIME
+                   | pin DATETIME BLOCK movie:TITLE | pin DATETIME BLOCK episode:SHOW/TITLE | unpin DATETIME BLOCK | clear [--from DATE] [--to DATE]
                                         (dates are local to the channel: 2026-10-31 or 2026-10-31T20:00)
   daytuner run <name> [--yes]            (a dry run without --yes)
   daytuner cursor <name> list | rewind <sequence> <k> | set <sequence> <episode-number>
@@ -276,7 +277,7 @@ export async function runCli(argv: string[], io: CliEnv): Promise<number> {
         const slots = store.stagedSlots(ch.id, date(values.from), date(values.to));
         if (slots.length === 0) io.out('Nothing is staged.');
         for (const s of slots) {
-          io.out(`${inZone(s.start, zone)} to ${inZone(s.end, zone)}  ${s.slotId ? slotLabel(s.slotId) : 'added'} ${s.pool ?? ''}${s.locked ? '  [locked]' : ''}  ${s.planned.programs.length} program(s)`);
+          io.out(`${inZone(s.start, zone)} to ${inZone(s.end, zone)}  ${s.slotId ? slotLabel(s.slotId) : 'added'} ${s.pool ?? ''}${s.locked ? '  [locked]' : ''}  ${s.planned.programs.length} program(s)${Object.keys(s.pins).length ? `  pinned: ${Object.entries(s.pins).map(([n, p]) => `block ${n} = ${p.title}`).join(', ')}` : ''}`);
         }
         store.close();
         return 0;
@@ -287,6 +288,29 @@ export async function runCli(argv: string[], io: CliEnv): Promise<number> {
         io.out(sub === 'lock'
           ? `Locked the slot starting ${inZone(start, zone)}. It will be committed exactly as it is staged; if it no longer fits when its time comes it is planned again and the commit log records why.`
           : `Unlocked the slot starting ${inZone(start, zone)}. It is planned again at commit time.`);
+        store.close();
+        return 0;
+      }
+      if (sub === 'pin' && rest[2] && rest[3] && rest[4]) {
+        const start = parseLocalDateTime(zone, rest[2]);
+        const block = Number(rest[3]);
+        if (!Number.isInteger(block) || block < 1) throw new Error('the block is a whole number from 1');
+        const client = reader();
+        const program = await findProgram(client, rest.slice(4).join(' '));
+        store.setPin(name!, start, block, program);
+        const r = await stageGenerate({ store, client, clock: io.clock }, name!, { to: start + 1, keepFrom: start, keepTo: start + 1 });
+        io.out(`Pinned ${program.title} to block ${block} of the slot starting ${inZone(start, zone)}. The slot was planned again around it; nothing was written to Tunarr.`);
+        const trouble = r.warnings.filter((w) => w.code === 'pin-does-not-fit' || w.code === 'pin-dropped');
+        for (const w of trouble) io.out(`${w.severity.toUpperCase()}: ${w.message}`);
+        if (trouble.length === 0) io.out('The pin holds.');
+        store.close();
+        return 0;
+      }
+      if (sub === 'unpin' && rest[2] && rest[3]) {
+        const start = parseLocalDateTime(zone, rest[2]);
+        store.removePin(name!, start, Number(rest[3]));
+        await stageGenerate({ store, client: reader(), clock: io.clock }, name!, { to: start + 1, keepFrom: start, keepTo: start + 1 });
+        io.out(`Removed the pin on block ${rest[3]} of the slot starting ${inZone(start, zone)}. The slot was planned again.`);
         store.close();
         return 0;
       }

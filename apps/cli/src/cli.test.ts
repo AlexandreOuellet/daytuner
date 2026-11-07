@@ -217,8 +217,10 @@ describe('the command line', () => {
     await run('stage', 'Test', 'show');
     expect(said()).toMatch(/2026-11-18 08:00 to [^\n]*\[locked\]/);
     out.length = 0;
-    expect(await run('stage', 'Test', 'generate', '--to', '2026-11-20', '--keep', '2026-11-18..2026-11-20')).not.toBe(0);
-    expect(errs.join('\n')).toMatch(/locked/);
+    expect(await run('stage', 'Test', 'generate', '--to', '2026-11-20', '--keep', '2026-11-18..2026-11-20')).toBe(0);
+    out.length = 0;
+    await run('stage', 'Test', 'show');
+    expect(said()).toMatch(/2026-11-18 08:00 to [^\n]*\[locked\]/); // generating again kept the locked slot
     out.length = 0;
     expect(await run('stage', 'Test', 'unlock', '2026-11-18T08:00')).toBe(0);
     expect(await run('stage', 'Test', 'lock', '2026-11-18T08:07')).not.toBe(0);
@@ -230,6 +232,25 @@ describe('the command line', () => {
     expect(said()).toContain('Nothing is staged');
     expect(await run('stage', 'Test', 'generate')).not.toBe(0);
     expect(await run('stage', 'Test', 'generate', '--to', 'soon')).not.toBe(0);
+  });
+
+  it('pins a program to a block, shows it, and removes it', async () => {
+    await run('channel', 'add', join(dir, 'test.yaml'));
+    await run('stage', 'Test', 'generate', '--to', '2026-11-20', '--keep', '2026-11-18..2026-11-20');
+    out.length = 0;
+    expect(await run('stage', 'Test', 'pin', '2026-11-18T20:00', '1', 'movie:Movie 3')).toBe(0);
+    expect(said()).toContain('Pinned Movie 3 to block 1');
+    expect(said()).toContain('The pin holds.');
+    out.length = 0;
+    await run('stage', 'Test', 'show');
+    expect(said()).toMatch(/2026-11-18 20:00 to [^\n]*pinned: block 1 = Movie 3/);
+    out.length = 0;
+    expect(await run('stage', 'Test', 'pin', '2026-11-18T20:00', '2', 'movie:Nonexistent')).not.toBe(0);
+    expect(errs.join('\n')).toContain('no movie titled');
+    out.length = 0;
+    expect(await run('stage', 'Test', 'unpin', '2026-11-18T20:00', '1')).toBe(0);
+    await run('stage', 'Test', 'show');
+    expect(said()).not.toContain('pinned:');
   });
 
   it('previews without a store', async () => {

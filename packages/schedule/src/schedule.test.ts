@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { plan, emptyPlanState, toLocalForTest } from './testing.js';
 import { parseScheduleFile, ScheduleFileError } from './file.js';
-import { resolveSchedule, ResolveError, same, takeTurns } from './resolve.js';
+import { findProgram, resolveSchedule, ResolveError, same, takeTurns } from './resolve.js';
 import { fakeSource } from './testing.js';
 
 const EXAMPLE = readFileSync(new URL('../../../schedules/example.yaml', import.meta.url), 'utf8');
@@ -164,5 +164,18 @@ describe('chapters', () => {
     const r = await resolveSchedule(file, { ...fakeSource(), chapters: async (id) => { if (id === 'mov-comedy-100') throw new Error('boom'); return []; } });
     expect(r.library.programs['mov-comedy-100']).toBeDefined();
     expect(r.notes[0]).toMatch(/chapters could not be read for 1 of \d+ programs/);
+  });
+});
+
+describe('finding a program by text', () => {
+  it('finds a movie or an episode, ignoring case', async () => {
+    expect(await findProgram(fakeSource(), 'movie:mid laughs')).toMatchObject({ id: 'mov-comedy-100', title: 'Mid Laughs' });
+    expect(await findProgram(fakeSource(), 'episode:the office/Episode 3')).toMatchObject({ id: 'office-3', title: 'The Office "Episode 3"' });
+  });
+  it('says what was wrong', async () => {
+    await expect(findProgram(fakeSource(), 'movie:Nope')).rejects.toThrow(/no movie titled/);
+    await expect(findProgram(fakeSource(), 'episode:The Office/Nope')).rejects.toThrow(/no episode titled/);
+    await expect(findProgram(fakeSource({ duplicateWho: true }), 'episode:Doctor Who/Halloween Special')).rejects.toThrow(/more than one show/);
+    await expect(findProgram(fakeSource(), 'Mid Laughs')).rejects.toThrow(/write movie:Title/);
   });
 });

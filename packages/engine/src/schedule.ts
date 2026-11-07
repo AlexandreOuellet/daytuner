@@ -114,7 +114,7 @@ export interface PlannedSlot {
   programs: string[];
   /** The blocks in order. A block starts where the previous one ended; the first starts at the slot's
    *  start (head included) and the last ends at the slot's end (tail included). */
-  blocks: { programId: string; start: Ms; end: Ms }[];
+  blocks: { programId: string; start: Ms; end: Ms; pinned?: true }[];
   /** True when an exception replaced the slot's normal programming. */
   exception: boolean;
   items: Item[];
@@ -132,6 +132,8 @@ export type PlanWarningCode =
   | 'started-mid-slot'
   | 'exception-matches-no-slot'
   | 'locked-slot-conflict'
+  | 'pin-does-not-fit'
+  | 'pin-dropped'
   | 'block';
 
 export interface PlanWarning {
@@ -157,6 +159,12 @@ export interface PlanInput {
    * One that no longer fits is planned again and reported in `conflicts`.
    */
   locked?: readonly PlannedSlot[];
+  /**
+   * Programs pinned to blocks of the slot that starts at `start`: block number (1 is the first) to a program
+   * id. A pinned block is an explicit pick: it never reads or moves a cursor or a bag. A pin never resizes the
+   * slot; one that does not fit, or names a block the slot does not have, is dropped with a warning.
+   */
+  pins?: readonly { start: Ms; blocks: Readonly<Record<number, string>> }[];
 }
 
 export type LockConflictReason = 'window-changed' | 'program-gone' | 'duration-changed' | 'clip-gone';

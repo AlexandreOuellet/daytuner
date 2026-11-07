@@ -20,6 +20,8 @@ interface Window {
   slot: SlotDef;
   slotId: string;
   exception?: ExceptionDef;
+  /** Block number to a pinned program id. */
+  pins?: Readonly<Record<number, string>>;
 }
 
 /** The planner's working copy of the state. Cloned for trials, adopted on success. */
@@ -46,6 +48,8 @@ const sequenceKey = (s: SlotDef): string => `seq:${s.link ? s.link.name : slotId
 interface Placed {
   programId: string;
   explicit: boolean;
+  /** Chosen by a pin, not taken from the pool. */
+  pinned: boolean;
   preBumper: Clip | undefined;
   postBumper: Clip | undefined;
   /** The block as planned. The last one is rebuilt with the tail. */
@@ -77,6 +81,7 @@ export function plan(input: PlanInput): PlanResult {
   };
 
   const locked = new Map((input.locked ?? []).map((s) => [s.start, s]));
+  const pinsLeft = new Map((input.pins ?? []).map((p) => [p.start, p.blocks]));
   const conflicts: LockConflict[] = [];
   const slots: PlannedSlot[] = [];
   for (const w of windowsFor(schedule, input.from, input.to, input.exact === true, work)) {
@@ -92,7 +97,14 @@ export function plan(input: PlanInput): PlanResult {
       conflicts.push(conflict);
       warn(work, 'locked-slot-conflict', 'alert', w.start, w.slotId, `the locked slot could not be kept: ${conflict.message}. It was planned again.`);
     }
-    slots.push(planWindow(ctx, work, w));
+    const pins = pinsLeft.get(w.start);
+    pinsLeft.delete(w.start);
+    slots.push(planWindow(ctx, work, pins ? { ...w, pins } : w));
+  }
+  for (const [start, blocks] of pinsLeft) {
+    if (start >= input.from && start < input.to && Object.keys(blocks).length > 0) {
+      warn(work, 'pin-dropped', 'warning', start, '', 'pins were set on a slot starting here, but no slot of the schedule starts here any more');
+    }
   }
   // A locked slot in the planned range that no window starts at any more.
   for (const [start, held] of locked) {
@@ -308,7 +320,7 @@ function planWindow(ctx: Ctx, work: Work, w: Window): PlannedSlot {
     end: w.end,
     pool: w.slot.pool,
     programs: placed.map((p) => p.programId),
-    blocks: placed.map((p) => ({ programId: p.programId, start: p.block.start, end: p.block.end })),
+    blocks: placed.map((p) => ({ programId: p.programId, start: p.block.start, end: p.block.end, ...(p.pinned ? { pinned: true as const } : {}) })),
     exception: result.explicit,
     items,
   };
@@ -334,7 +346,7 @@ function planNormally(ctx: Ctx, work: Work, w: Window, pool: Pool): { placed: Pl
       for (let k = n; k >= 1; k--) ids.push(pool.programs[(((seq.position - k) % length) + length) % length]!);
       const trial = cloneWork(work);
       const r = placeBlocks(ctx, trial, w, { kind: 'list', ids, explicit: false });
-      if (r.placed.length === n) {
+      if (r.placed.filter((p) => !p.pinned).length === n) {
         adopt(work, trial);
         const lastBlock = r.placed[r.placed.length - 1]!.block;
         const unfilled = lastBlock.gap + (w.end - lastBlock.end);
@@ -360,7 +372,8 @@ function planNormally(ctx: Ctx, work: Work, w: Window, pool: Pool): { placed: Pl
   // Ordered shows never skip: the list is the episodes from the head onward, as far as they fit.
   for (let i = 0; i < Math.min(length, 200); i++) ids.push(orderedPick(pool.programs, seq.position, i)!.id);
   const r = placeBlocks(ctx, work, w, { kind: 'list', ids, explicit: false });
-  work.sequences[key] = { position: (seq.position + r.placed.length) % length, history: seq.history + r.placed.length };
+  const taken = r.placed.filter((p) => !p.pinned).length;
+  work.sequences[key] = { position: (seq.position + taken) % length, history: seq.history + taken };
   reportStop(work, w, r, 'ordered');
   return { placed: r.placed, edges: r.edges, explicit: false };
 }
@@ -433,6 +446,8 @@ function placeBlocks(ctx: Ctx, work: Work, w: Window, source: Source): PlaceResu
   let unfit: string | undefined;
   let skipped = 0;
   let lastOnly = false;
+  let pulled = 0; // blocks taken from the source, which pinned blocks are not
+  const usedPins = new Set<number>();
 
   while (!lastOnly) {
     if (t >= w.end - tailReserve) break;
@@ -469,25 +484,45 @@ function placeBlocks(ctx: Ctx, work: Work, w: Window, source: Source): PlaceResu
     };
 
     let chosen: string | undefined;
-    if (source.kind === 'list') {
-      chosen = source.ids[placed.length];
-      if (chosen === undefined) { stop = 'exhausted'; break; }
-      if (!tryFit(chosen)) { stop = 'nofit'; unfit = chosen; break; }
-    } else {
-      const bag = trial.bags[source.key] ?? emptyBag();
-      const r = pickFromBag(source.pool.programs, bag, trial.rng, (id) => tryFit(id) !== undefined);
-      trial.rng = r.rng;
-      if (r.pick === undefined) { stop = 'nofit'; break; }
-      skipped += r.skipped;
-      trial.bags[source.key] = r.bag;
-      chosen = r.pick;
+    let pinned = false;
+    const pin = w.pins?.[placed.length + 1];
+    if (pin !== undefined) {
+      usedPins.add(placed.length + 1);
+      if (!(pin in library.programs)) {
+        warn(trial, 'pin-dropped', 'warning', t, w.slotId, `the program pinned to block ${placed.length + 1} (${pin}) is not in the library, so the block is planned as usual`);
+      } else if (tryFit(pin)) {
+        chosen = pin;
+        pinned = true;
+      } else {
+        const need = library.programs[pin]!.duration;
+        const room = w.end - tailReserve - t;
+        warn(trial, 'pin-does-not-fit', 'alert', t, w.slotId,
+          `the program pinned to block ${placed.length + 1} (${pin}) does not fit: it lasts ${Math.round(need / MINUTE)} min with its breaks needing more, and ${Math.round(room / MINUTE)} min remain. The block is planned as usual; extend the slot or pin something shorter`);
+      }
+    }
+    if (!pinned) {
+      if (source.kind === 'list') {
+        chosen = source.ids[pulled];
+        if (chosen === undefined) { stop = 'exhausted'; work.warnings = trial.warnings; break; }
+        if (!tryFit(chosen)) { stop = 'nofit'; unfit = chosen; work.warnings = trial.warnings; break; }
+      } else {
+        const bag = trial.bags[source.key] ?? emptyBag();
+        const r = pickFromBag(source.pool.programs, bag, trial.rng, (id) => tryFit(id) !== undefined);
+        trial.rng = r.rng;
+        if (r.pick === undefined) { stop = 'nofit'; work.warnings = trial.warnings; break; }
+        skipped += r.skipped;
+        trial.bags[source.key] = r.bag;
+        chosen = r.pick;
+      }
+      pulled++;
     }
 
-    const fit = tryFit(chosen)!;
+    const fit = tryFit(chosen!)!;
     adopt(work, trial);
     placed.push({
-      programId: chosen,
-      explicit: source.kind === 'list' && source.explicit,
+      programId: chosen!,
+      explicit: pinned || (source.kind === 'list' && source.explicit),
+      pinned,
       preBumper,
       postBumper,
       input: fit.input,
@@ -495,6 +530,12 @@ function placeBlocks(ctx: Ctx, work: Work, w: Window, source: Source): PlaceResu
     });
     if (fit.asLast) lastOnly = true;
     t = fit.block.end;
+  }
+
+  for (const [n] of Object.entries(w.pins ?? {})) {
+    if (!usedPins.has(Number(n))) {
+      warn(work, 'pin-dropped', 'warning', w.start, w.slotId, `a program is pinned to block ${n}, but this slot has only ${placed.length} block(s), so the pin was dropped`);
+    }
   }
 
   // The last block takes the tail and runs to the end of the slot.

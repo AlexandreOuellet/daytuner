@@ -6,7 +6,8 @@ daytuner channel add <channel.yaml> [--channel NAME] [--seed N] [--floor 7d] [--
 daytuner channel set-schedule <name> <channel.yaml>      (saves a new revision)
 daytuner channel revisions <name> | diff <name> [from [to]] | rollback <name> <number>
 daytuner channel list | status <name> | commits <name> | adopt-history <name> [--yes]
-daytuner stage <name> generate --to DATE [--keep DATE..DATE] | show [--from DATE] [--to DATE] | lock DATETIME | unlock DATETIME | clear [--from DATE] [--to DATE]
+daytuner stage <name> generate --to DATE [--keep DATE..DATE] | show [--from DATE] [--to DATE] | lock DATETIME | unlock DATETIME
+                   | pin DATETIME BLOCK movie:TITLE | pin DATETIME BLOCK episode:SHOW/TITLE | unpin DATETIME BLOCK | clear [--from DATE] [--to DATE]
 daytuner run <name> [--yes]
 daytuner cursor <name> list | rewind <sequence> <k> | set <sequence> <episode-number>
 ```

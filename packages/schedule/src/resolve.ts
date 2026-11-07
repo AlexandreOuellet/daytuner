@@ -219,3 +219,33 @@ export async function resolveSchedule(file: ScheduleFile, source: LibrarySource)
   };
   return { schedule, library: { programs, clips }, fillerListIds, titles, notes };
 }
+
+/**
+ * Finds one program in the library from text: `movie:Title`, or `episode:Show/Episode title`. Matching ignores
+ * case and quote style. More than one match, or none, is an error that says what was found.
+ */
+export async function findProgram(
+  source: Pick<LibrarySource, 'movies' | 'shows' | 'episodes'>,
+  spec: string,
+): Promise<{ id: string; title: string; duration: number }> {
+  const movie = /^movie:(.+)$/s.exec(spec.trim());
+  if (movie) {
+    const title = movie[1]!.trim();
+    const found = (await source.movies()).filter((m) => same(m.title, title));
+    if (found.length === 0) throw new ResolveError(`there is no movie titled "${title}"`);
+    if (found.length > 1) throw new ResolveError(`there is more than one movie titled "${title}" (${found.map((m) => m.id).join(', ')})`);
+    return { id: found[0]!.id, title: found[0]!.title, duration: found[0]!.duration };
+  }
+  const ep = /^episode:(.+?)\/(.+)$/s.exec(spec.trim());
+  if (ep) {
+    const [show, title] = [ep[1]!.trim(), ep[2]!.trim()];
+    const shows = (await source.shows()).filter((x) => same(x.title, show));
+    if (shows.length === 0) throw new ResolveError(`there is no show named "${show}"`);
+    if (shows.length > 1) throw new ResolveError(`there is more than one show named "${show}" (${shows.map((x) => x.id).join(', ')})`);
+    const found = (await source.episodes(shows[0]!.id)).filter((e) => same(e.title, title));
+    if (found.length === 0) throw new ResolveError(`"${show}" has no episode titled "${title}"`);
+    if (found.length > 1) throw new ResolveError(`"${show}" has more than one episode titled "${title}"`);
+    return { id: found[0]!.id, title: `${shows[0]!.title} "${found[0]!.title}"`, duration: found[0]!.duration };
+  }
+  throw new ResolveError(`"${spec}" is not a program: write movie:Title or episode:Show/Episode title`);
+}

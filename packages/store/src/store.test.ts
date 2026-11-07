@@ -266,18 +266,30 @@ describe('staged slots', () => {
     expect(store.stagedSlots(id)).toHaveLength(0);
   });
 
-  it('locks and unlocks a slot, and will not replace a locked one', () => {
+  it('locks and unlocks a slot; replacing a range leaves a locked slot as it is', () => {
     store.replaceStaged('funny', 1000, 9000, [slot(2000, 3000), slot(5000, 6000)], 1);
     store.setLocked('funny', 2000, true);
     expect(store.stagedSlots(id).map((s) => s.locked)).toEqual([true, false]);
-    expect(() => store.replaceStaged('funny', 1000, 9000, [], 2)).toThrow(/locked/);
-    expect(store.stagedSlots(id)).toHaveLength(2);
-    store.replaceStaged('funny', 4000, 9000, [], 2); // the unlocked part can be replaced
-    expect(store.stagedSlots(id)).toHaveLength(1);
+    store.replaceStaged('funny', 1000, 9000, [{ ...slot(2000, 3500), programs: ['changed'] }, slot(5000, 7000)], 2);
+    const after = store.stagedSlots(id);
+    expect(after.map((s) => [s.start, s.end, s.locked, s.planned.programs[0]])).toEqual([[2000, 3000, true, 'm1'], [5000, 7000, false, 'm1']]);
     store.setLocked('funny', 2000, false);
     store.replaceStaged('funny', 1000, 9000, [], 3);
     expect(store.stagedSlots(id)).toHaveLength(0);
     expect(() => store.setLocked('funny', 4242, true)).toThrow(/no slot is staged/);
+  });
+
+  it('keeps pins on a slot that is planned again, and refuses to pin a locked slot', () => {
+    store.replaceStaged('funny', 1000, 9000, [slot(2000, 3000)], 1);
+    store.setPin('funny', 2000, 2, { id: 'p9', title: 'Special', duration: 5000 });
+    store.replaceStaged('funny', 1000, 9000, [{ ...slot(2000, 3000), programs: ['again'] }], 2);
+    expect(store.stagedSlots(id)[0]).toMatchObject({ pins: { 2: { id: 'p9', title: 'Special', duration: 5000 } } });
+    expect(store.stagedSlots(id)[0]!.planned.programs).toEqual(['again']);
+    store.removePin('funny', 2000, 2);
+    expect(store.stagedSlots(id)[0]!.pins).toEqual({});
+    store.setLocked('funny', 2000, true);
+    expect(() => store.setPin('funny', 2000, 1, { id: 'x', title: 'x', duration: 1 })).toThrow(/locked/);
+    expect(() => store.setPin('funny', 4242, 1, { id: 'x', title: 'x', duration: 1 })).toThrow(/no slot is staged/);
   });
 
   it('drops the staged slots a completed commit has put in Tunarr', () => {

@@ -5,7 +5,7 @@
 
 import { adjustSequence, plan, type Clock, type CursorAdjustment, type LockConflict, type PlannedSlot, type PlanWarning, type Schedule } from '@daytuner/engine';
 import { parseScheduleFile, resolveSchedule } from '@daytuner/schedule';
-import type { CommitRecord, Store } from '@daytuner/store';
+import type { ChannelRecord, CommitRecord, Store } from '@daytuner/store';
 import { alignToGrid, appendVerified, toLineupItems, totalDuration, type LineupItem, type TunarrClient } from '@daytuner/tunarr-client';
 
 /** Two ends closer than this are the same: Tunarr's durations carry fractions that are rounded. */
@@ -69,6 +69,32 @@ function resolvePending(store: Store, pending: CommitRecord, edgeNow: number, at
   );
 }
 
+/**
+ * What staging adds to a plan: the locked slots as stored, and the pins of the others. A pinned program that no
+ * pool uses is added to the library with the length it had when it was pinned.
+ */
+function stagedInputs(
+  store: Store,
+  ch: ChannelRecord,
+  edge: number,
+  library: { programs: Record<string, { duration: number }> },
+  titles: Record<string, string>,
+): { locked: PlannedSlot[]; pins: { start: number; blocks: Record<number, string> }[] } {
+  const staged = store.stagedSlots(ch.id, edge);
+  const pins: { start: number; blocks: Record<number, string> }[] = [];
+  for (const s of staged) {
+    if (s.locked || Object.keys(s.pins).length === 0) continue;
+    const blocks: Record<number, string> = {};
+    for (const [n, pin] of Object.entries(s.pins)) {
+      blocks[Number(n)] = pin.id;
+      library.programs[pin.id] ??= { duration: pin.duration };
+      titles[pin.id] ??= pin.title;
+    }
+    pins.push({ start: s.start, blocks });
+  }
+  return { locked: staged.filter((s) => s.locked).map((s) => s.planned), pins };
+}
+
 export async function topUp(deps: WorkerDeps, channelName: string, opts: TopUpOptions = {}): Promise<TopUpResult> {
   const { store, client, clock } = deps;
   let ch = store.channel(channelName);
@@ -103,10 +129,10 @@ export async function topUp(deps: WorkerDeps, channelName: string, opts: TopUpOp
   const base = { ...(recovered ? { recovered } : {}), aheadBefore: ahead, warnings: [] as PlanWarning[], conflicts: [] as LockConflict[] };
   if (ahead >= ch.floorMs + ch.stepMs) return { action: 'none', ...base };
 
-  const { schedule, library, fillerListIds } = await resolveSchedule(parseScheduleFile(ch.schedule), client);
+  const { schedule, library, fillerListIds, titles } = await resolveSchedule(parseScheduleFile(ch.schedule), client);
   const { from, flex } = alignToGrid(edgeNow, schedule.grid);
-  const locked = store.stagedSlots(ch.id, edgeNow).filter((s) => s.locked).map((s) => s.planned);
-  const result = plan({ schedule, library, state: ch.state, from, to: now + ch.floorMs + ch.stepMs, locked });
+  const { locked, pins } = stagedInputs(store, ch, edgeNow, library, titles);
+  const result = plan({ schedule, library, state: ch.state, from, to: now + ch.floorMs + ch.stepMs, locked, pins });
   if (result.slots.length === 0) return { action: 'none', ...base, warnings: result.warnings };
 
   const items: LineupItem[] = [...(flex > 0 ? [{ type: 'flex' as const, duration: flex }] : []), ...toLineupItems(result.slots, fillerListIds)];
@@ -254,10 +280,11 @@ export async function stageGenerate(
   const keepTo = range.keepTo ?? range.to;
   if (!(range.to > from)) throw new ConsistencyError('the end of the range is not after the end of the committed lineup');
   if (!(keepTo > keepFrom) || keepFrom < from || keepTo > range.to) throw new ConsistencyError('the part to keep must lie inside the range, after the committed lineup');
-  const result = plan({ schedule, library, state: ch.state, from, to: range.to });
+  const { locked, pins } = stagedInputs(store, ch, from, library, titles);
+  const result = plan({ schedule, library, state: ch.state, from, to: range.to, locked, pins });
   const kept = result.slots.filter((s) => s.start >= keepFrom && s.start < keepTo);
   store.replaceStaged(channelName, keepFrom, keepTo, kept, clock.now());
-  return { kept, planned: result.slots.length, warnings: result.warnings.filter((w) => w.at >= keepFrom && w.at < keepTo), titles };
+  return { kept, planned: result.slots.length, warnings: result.warnings.filter((w) => kept.some((k) => w.at >= k.start && w.at < k.end)), titles };
 }
 
 export interface SequenceInfo {

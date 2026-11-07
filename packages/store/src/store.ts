@@ -43,6 +43,14 @@ export interface RevisionRecord {
   savedAt: number;
 }
 
+/** A program pinned to a block of a staged slot. The length is kept because the program may not be in any pool. */
+export interface PinRecord {
+  id: string;
+  title: string;
+  /** Whole milliseconds, as read from Tunarr when it was pinned. */
+  duration: number;
+}
+
 /** A planned slot kept ahead of the committed edge, to look at, edit and lock before it is committed. */
 export interface StagedSlotRecord {
   channelId: number;
@@ -52,8 +60,8 @@ export interface StagedSlotRecord {
   /** The week slot it came from (`day@time`), or none for a slot added by hand. */
   slotId: string | null;
   pool: string | null;
-  /** Block number (1 is the first) to a program id. */
-  pins: Record<number, string>;
+  /** Block number (1 is the first) to the program pinned there. */
+  pins: Record<number, PinRecord>;
   locked: boolean;
   /** The slot as last generated: its blocks and items. */
   planned: PlannedSlot;
@@ -400,24 +408,50 @@ export class Store {
   }
 
   /**
-   * Stores generated slots as staged slots, replacing the staged slots that start inside `[from, to)`.
-   * Refuses when a locked slot is in that range, or a slot starts before the committed edge: staging only
-   * lives after it.
+   * Stores generated slots as the staged slots that start inside `[from, to)`. Locked slots stay as they are
+   * (a generated slot at the same start is ignored); the others are replaced, and keep their pins. Refuses a
+   * slot that starts before the committed edge: staging only lives after it.
    */
   replaceStaged(name: string, from: number, to: number, slots: readonly PlannedSlot[], at: number): void {
     this.tx(() => {
       const ch = this.channel(name);
       if (!ch) throw new StoreError(`no channel named "${name}"`);
-      const locked = this.db
-        .prepare('select start from staged_slots where channel_id = ? and start >= ? and start < ? and locked = 1')
-        .all(ch.id, from, to) as { start: number }[];
-      if (locked.length > 0) throw new StoreError(`${locked.length} locked staged slot(s) are in that range; unlock them first`);
       for (const sl of slots) {
         if (sl.start < ch.edge) throw new StoreError('staged slots must start at or after the end of the committed lineup');
       }
-      this.db.prepare('delete from staged_slots where channel_id = ? and start >= ? and start < ?').run(ch.id, from, to);
+      const old = this.stagedSlots(ch.id, from, to);
+      const lockedStarts = new Set(old.filter((o) => o.locked).map((o) => o.start));
+      const pinsOf = new Map(old.map((o) => [o.start, o.pins]));
+      this.db.prepare('delete from staged_slots where channel_id = ? and start >= ? and start < ? and locked = 0').run(ch.id, from, to);
       const ins = this.db.prepare('insert into staged_slots (channel_id, start, end, slot_id, pool, pins, locked, planned, generated_at) values (?, ?, ?, ?, ?, ?, 0, ?, ?)');
-      for (const sl of slots) ins.run(ch.id, sl.start, sl.end, sl.slotId, sl.pool, '{}', JSON.stringify(sl), at);
+      for (const sl of slots) {
+        if (lockedStarts.has(sl.start)) continue;
+        ins.run(ch.id, sl.start, sl.end, sl.slotId, sl.pool, JSON.stringify(pinsOf.get(sl.start) ?? {}), JSON.stringify(sl), at);
+      }
+    });
+  }
+
+  /** Pins a program to a block of an unlocked staged slot. */
+  setPin(name: string, start: number, block: number, pin: PinRecord): void {
+    this.changePins(name, start, (pins) => ({ ...pins, [block]: pin }));
+  }
+
+  /** Removes the pin on a block. Does nothing when there is none. */
+  removePin(name: string, start: number, block: number): void {
+    this.changePins(name, start, (pins) => {
+      const { [block]: _gone, ...rest } = pins;
+      return rest;
+    });
+  }
+
+  private changePins(name: string, start: number, change: (pins: Record<number, PinRecord>) => Record<number, PinRecord>): void {
+    this.tx(() => {
+      const ch = this.channel(name);
+      if (!ch) throw new StoreError(`no channel named "${name}"`);
+      const slot = this.stagedSlots(ch.id, start, start + 1)[0];
+      if (!slot) throw new StoreError('no slot is staged starting then');
+      if (slot.locked) throw new StoreError('that slot is locked; unlock it to change its pins');
+      this.db.prepare('update staged_slots set pins = ? where channel_id = ? and start = ?').run(JSON.stringify(change(slot.pins)), ch.id, start);
     });
   }
 
@@ -431,7 +465,7 @@ export class Store {
         return {
           channelId, start: Number(o['start']), end: Number(o['end']),
           slotId: o['slot_id'] === null ? null : String(o['slot_id']), pool: o['pool'] === null ? null : String(o['pool']),
-          pins: JSON.parse(String(o['pins'])) as Record<number, string>, locked: Number(o['locked']) === 1,
+          pins: JSON.parse(String(o['pins'])) as Record<number, PinRecord>, locked: Number(o['locked']) === 1,
           planned: JSON.parse(String(o['planned'])) as PlannedSlot, generatedAt: Number(o['generated_at']),
         };
       });
