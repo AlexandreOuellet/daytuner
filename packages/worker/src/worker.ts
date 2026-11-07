@@ -650,6 +650,71 @@ export async function adoptHistory(
   return { found, titles };
 }
 
+export interface CursorAiring {
+  /** Where the slot starts, and the week slot it comes from. */
+  start: number;
+  slotId: string;
+  /** `continue` takes the show's next episodes; `rerun` replays the ones behind its place. */
+  kind: 'continue' | 'rerun';
+  /** The episodes it plays now, and after the adjustment. */
+  before: string[];
+  after: string[];
+  /** Already staged, and locked (a locked slot keeps its episodes whatever the adjustment). */
+  staged: boolean;
+  locked: boolean;
+}
+
+export interface CursorPreview {
+  key: string;
+  pool: string;
+  length: number;
+  before: { position: number; history: number };
+  after: { position: number; history: number };
+  /** Everything before this is already committed to Tunarr and stays as it is. */
+  committedUntil: number;
+  airings: CursorAiring[];
+  titles: Record<string, string>;
+}
+
+/**
+ * What an adjustment would change, without applying it: the next airings of the show's slots, from the end of
+ * the committed lineup and through what is staged, with the episodes each plays now and after the change.
+ * Plans twice (without and with the adjustment) and compares. Writes nothing.
+ */
+export async function cursorPreview(
+  deps: Pick<WorkerDeps, 'store' | 'client' | 'clock'>,
+  channelName: string,
+  sequenceKey: string,
+  adjustment: CursorAdjustment,
+  opts: { count?: number; days?: number } = {},
+): Promise<CursorPreview> {
+  const { store, client, clock } = deps;
+  const ch = store.channel(channelName);
+  if (!ch) throw new ConsistencyError(`no channel named "${channelName}" in the store`);
+  const { schedule, library, titles } = await resolveSchedule(parseScheduleFile(ch.schedule), cachedSource(client, store, clock));
+  const info = listSequences(schedule).find((x) => x.key === sequenceKey);
+  if (!info) throw new ConsistencyError(`no ordered pool is called "${sequenceKey}" (known: ${listSequences(schedule).map((x) => x.key).join(', ') || 'none'})`);
+  const before = ch.state.sequences[sequenceKey] ?? { position: 0, history: 0 };
+  const after = adjustSequence(before, adjustment, info.length);
+  const { from } = alignToGrid(ch.edge, schedule.grid);
+  const to = from + (opts.days ?? 14) * 86_400_000;
+  const { locked, pins, windows } = stagedInputs(store, ch, from, library, titles);
+  const run = (seq: { position: number; history: number }) =>
+    plan({ schedule, library, state: { ...ch.state, sequences: { ...ch.state.sequences, [sequenceKey]: seq } }, from, to, locked, pins, windows });
+  const [a, b] = [run(before), run(after)];
+  const staged = new Map(store.stagedSlots(ch.id, from).map((r) => [r.start, r]));
+  const modeOf = (slotId: string): 'continue' | 'rerun' => schedule.week.find((w) => `${w.day}@${w.at}` === slotId)?.link?.mode === 'rerun' ? 'rerun' : 'continue';
+  const unpinned = (s: PlannedSlot): string[] => s.blocks.filter((x) => !x.pinned).map((x) => x.programId);
+  const airings: CursorAiring[] = [];
+  b.slots.forEach((slot, i) => {
+    if (!info.slots.includes(slot.slotId) || slot.exception) return;
+    const was = a.slots[i];
+    const row = staged.get(slot.start);
+    airings.push({ start: slot.start, slotId: slot.slotId, kind: modeOf(slot.slotId), before: was && was.start === slot.start ? unpinned(was) : [], after: unpinned(slot), staged: row !== undefined, locked: row?.locked === true });
+  });
+  return { key: sequenceKey, pool: info.pool, length: info.length, before, after, committedUntil: ch.edge, airings: airings.slice(0, opts.count ?? 6), titles };
+}
+
 /**
  * Moves an ordered show's place by hand (a missed week): rewind by k episodes, or set to an episode.
  * It changes the state at the committed edge, so it affects the first uncommitted airing onward and

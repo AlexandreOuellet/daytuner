@@ -19,7 +19,7 @@ import { alignToGrid, TunarrClient, type FetchLike } from '@daytuner/tunarr-clie
 import { ceilToGrid, computeMetrics, DAY, emptyPlanState, plan, type Clock } from '@daytuner/engine';
 import { addIds, diffLines, findProgram, formatDiff, parseDuration, parseLocalDateTime, parseScheduleFile, resolveSchedule } from '@daytuner/schedule';
 import { Store } from '@daytuner/store';
-import { adjustCursor, adoptHistory, cachedSource, ConsistencyError, listSequences, placesFromLineup, resync, revisionImpact, stageCheck, stageDiff, stageEdit, stageGenerate, stageRefresh, topUp } from '@daytuner/worker';
+import { adjustCursor, adoptHistory, cachedSource, ConsistencyError, cursorPreview, listSequences, placesFromLineup, resync, revisionImpact, stageCheck, stageDiff, stageEdit, stageGenerate, stageRefresh, topUp } from '@daytuner/worker';
 import { formatChanges, formatMetrics, formatWarnings, inZone, slotLabel } from './format.js';
 
 export interface CliEnv {
@@ -44,7 +44,7 @@ const USAGE = `Usage:
                                         (dates are local to the channel: 2026-10-31 or 2026-10-31T20:00)
   daytuner chapters clear                (forget the cached chapters; they are read again at the next plan)
   daytuner run <name> [--yes]            (a dry run without --yes)
-  daytuner cursor <name> list | rewind <sequence> <k> | set <sequence> <episode-number>
+  daytuner cursor <name> list | preview <sequence> rewind|set <n> | rewind <sequence> <k> | set <sequence> <episode-number>
 Common: --tunarr URL (or TUNARR_URL)  --db FILE (or DAYTUNER_DB, default state/daytuner.db)`;
 
 const slug = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
@@ -421,6 +421,21 @@ export async function runCli(argv: string[], io: CliEnv): Promise<number> {
         for (const s of listSequences(schedule)) {
           const st = ch.state.sequences[s.key] ?? { position: 0, history: 0 };
           io.out(`${s.key}  pool ${s.pool}  next episode ${st.position + 1} of ${s.length}  (${st.history} behind it have aired)  slots ${s.slots.join(', ')}`);
+        }
+        store.close();
+        return 0;
+      }
+      if (sub === 'preview' && key && rest[3] && rest[4] !== undefined) {
+        const n = Number(rest[4]);
+        if ((rest[3] !== 'rewind' && rest[3] !== 'set') || !Number.isInteger(n) || n < 0) throw new Error('use: cursor <name> preview <sequence> rewind|set <n> | set <episode-number>');
+        const adj = rest[3] === 'rewind' ? { kind: 'rewind' as const, by: n } : { kind: 'set' as const, index: n - 1 };
+        const p = await cursorPreview({ store, client, clock: io.clock }, name!, key, adj);
+        const zone = parseScheduleFile(ch.schedule).timezone;
+        const nm = (ids: string[]): string => (ids.length === 0 ? 'nothing' : ids.map((id) => p.titles[id] ?? id).slice(0, 2).join(', ') + (ids.length > 2 ? ` (+${ids.length - 2})` : ''));
+        io.out(`${key}: next episode ${p.before.position + 1} -> ${p.after.position + 1} of ${p.length}. Already in Tunarr until ${inZone(p.committedUntil, zone)}; that stays as it is.`);
+        for (const a of p.airings) {
+          const note = a.locked ? '  [locked: keeps its episodes]' : a.staged ? '  [staged]' : '';
+          io.out(`  ${inZone(a.start, zone)}  ${a.kind === 'rerun' ? 'rerun ' : ''}${nm(a.before)}  ->  ${nm(a.after)}${note}`);
         }
         store.close();
         return 0;

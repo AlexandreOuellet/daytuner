@@ -5,7 +5,7 @@ import { FakeTunarr, TunarrClient } from '@daytuner/tunarr-client';
 import { CHAPTER_CACHE_LIFETIME_MS } from './chapters.js';
 import { evaluateHealth } from './health.js';
 import { isDue, runAndRecord, scheduledInstant } from './scheduler.js';
-import { stageReset, adjustCursor, adoptHistory, revisionImpact, stageCheck, stageDiff, stageEdit, stageGenerate, stageRefresh, ConsistencyError, listSequences, resync, topUp, type WorkerDeps } from './worker.js';
+import { cursorPreview, stageReset, adjustCursor, adoptHistory, revisionImpact, stageCheck, stageDiff, stageEdit, stageGenerate, stageRefresh, ConsistencyError, listSequences, resync, topUp, type WorkerDeps } from './worker.js';
 
 const DAY = 86_400_000;
 const MIN = 60_000;
@@ -778,5 +778,44 @@ describe('the daily run', () => {
     s.fake.appendExternally([{ type: 'flex', duration: 5 * MIN }]);
     await expect(runAndRecord(s.deps, 'Test')).rejects.toThrow();
     expect(s.store.lastRuns(id, 1)[0]).toMatchObject({ outcome: 'refused' });
+  });
+});
+
+
+describe('previewing a cursor adjustment', () => {
+  const edgeOf = (s: ReturnType<typeof setup>) => s.store.channel('Test')!.edge;
+
+  it('shows the next airings of the show with the episode each plays now and after, and changes nothing', async () => {
+    const s = setup();
+    s.store.setState('Test', { ...s.store.channel('Test')!.state, sequences: { 'seq:a': { position: 10, history: 10 } } });
+    const p = await cursorPreview(s.deps, 'Test', 'seq:a', { kind: 'rewind', by: 2 });
+    expect(p).toMatchObject({ key: 'seq:a', before: { position: 10 }, after: { position: 8, history: 8 }, committedUntil: edgeOf(s) });
+    expect(p.airings.length).toBeGreaterThan(0);
+    const first = p.airings[0]!;
+    expect(first.kind).toBe('continue');
+    expect(first.before[0]).toBe('ep11');
+    expect(first.after[0]).toBe('ep9');
+    expect(first.staged).toBe(false);
+    expect(p.titles['ep9']).toBe('Show A S1E9 "Ep 9"');
+    expect(s.store.channel('Test')!.state.sequences['seq:a']).toEqual({ position: 10, history: 10 }); // the preview moved nothing
+  });
+
+  it('marks staged and locked airings, and a locked slot keeps its episodes', async () => {
+    const s = setup();
+    await stageGenerate(s.deps, 'Test', { to: edgeOf(s) + 4 * DAY });
+    const id = s.store.channel('Test')!.id;
+    const sit = s.store.stagedSlots(id).filter((r) => r.pool === 'sitcoms' && r.start > edgeOf(s) + 30 * MIN);
+    s.store.setLocked('Test', sit[0]!.start, true);
+    const p = await cursorPreview(s.deps, 'Test', 'seq:a', { kind: 'set', index: 100 }, { count: 4 });
+    const lockedAiring = p.airings.find((a) => a.start === sit[0]!.start)!;
+    expect(lockedAiring).toMatchObject({ staged: true, locked: true });
+    expect(lockedAiring.after).toEqual(lockedAiring.before);
+    const next = p.airings.find((a) => a.start === sit[1]!.start)!;
+    expect(next).toMatchObject({ staged: true, locked: false });
+    expect(next.after[0]).not.toBe(next.before[0]);
+  });
+
+  it('rejects an unknown sequence', async () => {
+    await expect(cursorPreview(setup().deps, 'Test', 'seq:nope', { kind: 'rewind', by: 1 })).rejects.toThrow(/known: seq:a/);
   });
 });

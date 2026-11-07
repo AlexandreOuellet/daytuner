@@ -173,6 +173,11 @@ describe('actions', () => {
     expect(set.state, set.message).toBe('done');
     expect(set.result).toMatchObject({ before: { position: 0 }, after: { position: 10 } });
     expect((await t.get('/api/channels/Test/cursors')).body[0].position).toBe(10);
+    const pv = await t.job('/api/channels/Test/cursors/preview', { key: 'seq:a', kind: 'rewind', amount: 5 });
+    expect(pv.state, pv.message).toBe('done');
+    expect(pv.result).toMatchObject({ key: 'seq:a', before: { position: 10 }, after: { position: 5 } });
+    expect((await t.get('/api/channels/Test/cursors')).body[0].position).toBe(10); // a preview changes nothing
+    expect((await t.post('/api/channels/Test/cursors/preview', { key: 'seq:a', kind: 'spin', amount: 1 })).status).toBe(400);
     expect((await t.job('/api/channels/Test/cursors/adjust', { key: 'seq:nope', kind: 'rewind', amount: 1 })).state).toBe('failed');
     expect((await t.post('/api/channels/Test/cursors/adjust', { key: 'seq:a', kind: 'spin', amount: 1 })).status).toBe(400);
   });

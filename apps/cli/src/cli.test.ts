@@ -340,6 +340,19 @@ describe('the command line', () => {
     expect(said()).toMatch(/\+ .*id: show-a/);
   });
 
+  it('previews a cursor adjustment without applying it', async () => {
+    await run('channel', 'add', join(dir, 'test.yaml'));
+    await run('cursor', 'Test', 'set', 'seq:a', '10');
+    out.length = 0;
+    expect(await run('cursor', 'Test', 'preview', 'seq:a', 'rewind', '2')).toBe(0);
+    expect(said()).toMatch(/seq:a: next episode 10 -> 8 of \d+\. Already in Tunarr until 2026-11-\d\d/);
+    expect(said()).toMatch(/Ep 10 +->  Ep 8|Ep 10.*->.*Ep 8/);
+    out.length = 0;
+    await run('cursor', 'Test', 'list');
+    expect(said()).toContain('next episode 10 of');
+    expect(await run('cursor', 'Test', 'preview', 'seq:a', 'spin', '1')).not.toBe(0);
+  });
+
   it('previews without a store', async () => {
     expect(await run('preview', join(dir, 'test.yaml'), '--days', '2', '--from', '2026-11-09T00:00:00Z')).toBe(0);
     expect(said()).toContain('grid accuracy');

@@ -31,13 +31,13 @@ never anything already in Tunarr. Each one is logged.
   Applying also plans the show's staged slots again; locked slots keep their episode and are named in a warning. If the
   next week is already committed, the page suggests lowering the floor for that channel, so there is room to adjust.
 
-## To build for this page
+## Built for this page
 
-- **A preview call** on the worker: for a sequence and an adjustment, the next airings of its slots, from the committed
+- **A preview call** (`cursorPreview` in the worker, `POST .../cursors/preview`, and `cursor <name> preview <sequence> rewind|set <n>` in the CLI): for a sequence and an adjustment, the next airings of its slots, from the committed
   edge and through staging, with each episode before and after, and a flag for committed ones. It plans twice (with and
   without the adjustment) and compares, like the staging diff.
 - **Applying an adjustment re-stages** the show's staged slots after it (`stageRefresh`), so the stored previews are not
-  stale.
+  stale (`POST .../cursors/adjust` does this).
 
 ## Open
 

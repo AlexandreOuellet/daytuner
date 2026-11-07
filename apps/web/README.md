@@ -57,7 +57,7 @@ needs the server started with `DAYTUNER_ALLOW_WRITES=1`.
 | `POST .../schedule/check` | `{ yaml }` | job: dry-run a new schedule against locked staged slots |
 | `POST .../schedule` | `{ yaml, force? }` | job: save a new revision; refused (`saved: false`) when locked slots would not fit, unless `force` |
 | `POST .../schedule/rollback` | `{ revision }` | make an earlier revision current |
-| `GET .../cursors`, `POST .../cursors/adjust` | `{ key, kind: rewind\|set, amount }` | the shows' places; move one (and plan the staged slots again) |
+| `GET .../cursors`, `POST .../cursors/preview`, `POST .../cursors/adjust` | `{ key, kind: rewind\|set, amount }` | the shows' places; job: what an adjustment would change (the next airings now and after, which are committed, staged or locked); job: move one and plan the staged slots again |
 | `POST .../run` | `{ dryRun? }` | job: plan, or commit when `dryRun` is `false` and writing is on |
 | `POST .../resync`, `/adopt-history` | `{ apply? }` | settle a pending commit or adopt Tunarr's end; set shows' places from the lineup (dry run unless `apply`) |
 | `GET .../export` | | the schedule with the library's ids beside every title |

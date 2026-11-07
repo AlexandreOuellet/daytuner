@@ -8,7 +8,7 @@ import { addIds, findProgram, parseLocalDateTime, parseScheduleFile, resolveSche
 import type { ChannelRecord, PinRecord, Store } from '@daytuner/store';
 import type { TunarrClient } from '@daytuner/tunarr-client';
 import {
-  adjustCursor, adoptHistory, addChannel, cachedSource, listSequences, resync, revisionImpact, stageCheck, stageDiff, stageEdit, stageGenerate,
+  adjustCursor, adoptHistory, addChannel, cachedSource, cursorPreview, listSequences, resync, revisionImpact, stageCheck, stageDiff, stageEdit, stageGenerate,
   runAndRecord, stageRefresh, stageReset, topUp, type StageEdit, type StageResult,
 } from '@daytuner/worker';
 import { Jobs } from './jobs.js';
@@ -221,6 +221,18 @@ export function registerActions(app: Hono, d: ActionDeps): void {
         return { key: s.key, pool: s.pool, length: s.length, slots: s.slots, position: st.position, history: st.history, next: id ? { programId: id, title: titles[id] ?? id } : null };
       }),
     );
+  });
+
+  app.post('/api/channels/:name/cursors/preview', async (c) => {
+    const ch = d.channel(c.req.param('name'));
+    const b = await bodyOf(c);
+    const key = needString(b, 'key');
+    const kind = needString(b, 'kind');
+    const amount = needInt(b, 'amount');
+    if (kind !== 'rewind' && kind !== 'set') throw new BadRequest('"kind" is rewind or set');
+    if (amount < 0) throw new BadRequest('"amount" is a whole number from 0');
+    const count = typeof b['count'] === 'number' ? b['count'] : undefined;
+    return job(c, ch.name, 'preview cursor', async () => cursorPreview(deps, ch.name, key, kind === 'rewind' ? { kind, by: amount } : { kind, index: amount }, count !== undefined ? { count } : {}));
   });
 
   app.post('/api/channels/:name/cursors/adjust', async (c) => {
