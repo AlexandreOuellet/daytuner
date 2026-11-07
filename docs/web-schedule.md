@@ -63,10 +63,33 @@ Tunarr.
   is the label).
 - Overflow and lateness above 0, and per-slot ad overrides, are not in 1.0, so the page has no control for them.
 
+## Special days (decided)
+
+- **A calendar of the coming year.** A year calendar with the week's slots behind it. A day with a special event is
+  marked with its state: a rule, staged, or already in Tunarr. Click a day to add one, or a mark to open it. You can see
+  Halloween coming and whether it is planned.
+
+  ```
+          October 2026                  November 2026
+   Mo Tu We Th Fr Sa Su            Mo Tu We Th Fr Sa Su
+                1  2  3             2  3  4  5  6  7  8
+    5  6  7  8  9 10 11            ...
+   ...
+   26 27 28 29 30 [31]*           * 31 Oct 20:00 Doctor Who, Halloween Special
+                                      rule, every year   [ Plan this day in staging ]
+  ```
+
+- **A new special day repeats every year by default**, with a "this year only" choice. That is the file format's month and
+  day (every year) or a full date (one year).
+- **A rule is for one program in one slot**, as the model says (`exceptions`: the slot that starts at that time is
+  replaced by the chosen program, which is an explicit, off-cursor pick). A bigger event goes through **"Plan this day in
+  staging"**, which opens the staging editor on that date, where slots are deleted, resized or added and programs pinned.
+  Staging never changes the schedule. The file format does not grow to describe ranges or several programs.
+
 ## Open
 
-- **Special days** (the file's `exceptions`): how a day or an event is added, and its relation to staging (a one-off
-  edit to a planned day) versus an exception (a rule that recurs every year). Next to design.
 - **The preview of the week** shown beside the grid: which numbers, and how fresh (planned on demand or on every edit).
 - **Copying a day or a slot** to other days, and bulk edits ("every weekday at 20:00").
 - **Small screens.** A week grid is wide; the page needs a narrower layout for a phone.
+- **How the calendar learns the state of a day** (rule, staged, committed): it reads the staged slots and the committed
+  edge from the store, which the staging editor design will fix.
