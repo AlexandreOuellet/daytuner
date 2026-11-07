@@ -12,10 +12,10 @@ are in [`roadmap.md`](roadmap.md); verified Tunarr facts are in [`tunarr-api.md`
 | 1 Engine | done | Time and grid, breaks, blocks, pools, clips, `plan()`, metrics. 137 tests, a golden test |
 | 2 Client and CLI | done | Reads the library, appends verified lineups, `preview`. Run end to end on the test copy |
 | 3 State and worker | built, not fully verified | SQLite store, safe top-up worker, `channel`, `run`, `cursor` commands. Run end to end on the test copy. Ad and filler playback and the media server's guide not checked |
-| 4 Schedules and staging | started | Design settled (architecture.md, "Phase 4 storage"). Revisions and slices 1 to 5 of staging (store, `stage generate|show|clear|lock|unlock|pin|unpin`, locked slots committed as stored, lock conflicts, pins, conflicts shown by `stage show`, `stage delete|resize|add`) built; the preview diff and the revision dry-run against locked slots to build |
+| 4 Schedules and staging | started | Design settled (architecture.md, "Phase 4 storage"). Revisions and all six slices of staging (store, `stage generate|show|clear|lock|unlock|pin|unpin`, locked slots committed as stored, lock conflicts, pins, conflicts shown by `stage show`, `stage delete|resize|add`) built), the preview diff and the revision dry-run against locked slots built; YAML export and a verified run on the test copy to do |
 | 5 Web interface | not started | Needs design first |
 
-Tests: 307 pass across the engine, client, store, schedule, worker and CLI, plus 3 client integration
+Tests: 315 pass across the engine, client, store, schedule, worker and CLI, plus 3 client integration
 tests that run only against a real Tunarr (`TUNARR_URL`).
 
 ## Needed for 1.0
@@ -33,8 +33,8 @@ Nothing is pushed publicly until all of this is done (see the roadmap).
 
 **Phase 4: schedules and staging**
 - [x] Schedules in the store with revisions, a diff and rollback (`channel set-schedule`, `revisions`, `diff`, `rollback`)
-- [ ] Saving a revision dry-runs it against the locked staged slots and lists those that no longer fit (needs staged slots first)
-- [ ] Staging: generate into staging (done), edit (done), preview the difference with what is committed (to do), commit (slice 6 in `staging-design.md`)
+- [x] Saving a revision dry-runs it against the locked staged slots and lists those that no longer fit
+- [x] Staging: generate into staging (done), edit (done), preview the difference (done), commit (the worker commits staged slots first)
 - [x] Pins, locks and lock conflicts in the engine (anchored planning too)
 - [ ] YAML export (import exists as `channel add` and `channel set-schedule`)
 

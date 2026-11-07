@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { emptyPlanState } from '@daytuner/engine';
 import { Store } from '@daytuner/store';
 import { FakeTunarr, TunarrClient } from '@daytuner/tunarr-client';
-import { adjustCursor, adoptHistory, stageCheck, stageEdit, stageGenerate, ConsistencyError, listSequences, resync, topUp, type WorkerDeps } from './worker.js';
+import { adjustCursor, adoptHistory, revisionImpact, stageCheck, stageDiff, stageEdit, stageGenerate, stageRefresh, ConsistencyError, listSequences, resync, topUp, type WorkerDeps } from './worker.js';
 
 const DAY = 86_400_000;
 const MIN = 60_000;
@@ -549,6 +549,64 @@ describe('reshaping staged slots', () => {
     await expect(stageEdit(s.deps, 'Test', { kind: 'resize', start: a.start, end: b.end + 15 * MIN })).rejects.toThrow(/locked/);
     s.store.setLocked('Test', b.start, false);
     expect(JSON.stringify(s.rows())).toBe(before);
+  });
+});
+
+describe('the preview diff', () => {
+  async function staged() {
+    const s = setup();
+    const edge = s.store.channel('Test')!.edge;
+    await stageGenerate(s.deps, 'Test', { to: edge + 4 * DAY });
+    const id = s.store.channel('Test')!.id;
+    return { ...s, id, full: s.store.stagedSlots(id).filter((r) => r.start > edge + 30 * MIN) };
+  }
+
+  it('an edit reports the slots it changed, with before and after', async () => {
+    const s = await staged();
+    const [a, b] = [s.full[0]!, s.full[1]!];
+    const r = await stageEdit(s.deps, 'Test', { kind: 'delete', start: b.start });
+    const grew = r.changes.find((c) => c.start === a.start)!;
+    expect(grew).toMatchObject({ kind: 'changed', endBefore: a.end, end: b.end });
+    expect(r.changes.find((c) => c.start === b.start)).toMatchObject({ kind: 'removed' });
+    expect(r.changes.every((c) => c.start >= a.start)).toBe(true);
+  });
+
+  it('generating the same range again changes nothing', async () => {
+    const s = await staged();
+    const r = await stageGenerate(s.deps, 'Test', { to: s.store.channel('Test')!.edge + 4 * DAY });
+    expect(r.changes).toEqual([]);
+  });
+
+  it('a pin shows up as a change to its slot, and the slots after it', async () => {
+    const s = await staged();
+    const slot = s.full.find((x) => x.pool === 'sitcoms')!;
+    s.store.setPin('Test', slot.start, 2, { id: 'ep200', title: 'Pinned', duration: 22 * MIN + 1000 });
+    const r = await stageRefresh(s.deps, 'Test', slot.start);
+    expect(r.changes.find((c) => c.start === slot.start)).toMatchObject({ kind: 'changed' });
+    expect(r.changes.find((c) => c.start === slot.start)!.after).toContain('ep200');
+  });
+
+  it('stage diff compares what was shaped with planning the schedule fresh', async () => {
+    const s = await staged();
+    expect((await stageDiff(s.deps, 'Test')).changes).toEqual([]);
+    const big = s.full.find((r) => r.end - r.start >= 6 * 60 * MIN)!;
+    await stageEdit(s.deps, 'Test', { kind: 'add', start: big.start + 60 * MIN, end: big.start + 120 * MIN, pin: { id: 'ep9', title: 'x', duration: 22 * MIN + 1000 } });
+    const d = await stageDiff(s.deps, 'Test');
+    expect(d.changes.some((c) => c.kind === 'new' && c.slotId.startsWith('added@'))).toBe(true);
+    expect(await stageDiff(setup().deps, 'Test')).toMatchObject({ changes: [], staged: 0 });
+  });
+
+  it('a new schedule is dry-run against the staged slots, and writes nothing', async () => {
+    const s = await staged();
+    const movie = s.full.find((r) => r.pool === 'movies')!;
+    s.store.setLocked('Test', movie.start, true);
+    const before = JSON.stringify([s.store.channel('Test'), s.store.stagedSlots(s.id)]);
+    expect((await revisionImpact(s.deps, 'Test', YAML)).conflicts).toEqual([]);
+    const moved = YAML.replaceAll('at: "20:00"', 'at: "21:00"');
+    const impact = await revisionImpact(s.deps, 'Test', moved);
+    expect(impact.conflicts.map((c) => [c.start, c.reason])).toEqual([[movie.start, 'window-changed']]);
+    expect(impact.changes.length).toBeGreaterThan(0);
+    expect(JSON.stringify([s.store.channel('Test'), s.store.stagedSlots(s.id)])).toBe(before);
   });
 });
 

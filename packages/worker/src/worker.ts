@@ -3,7 +3,7 @@
 // agree about where the lineup ends, and it records every commit so that a crash can be resolved.
 // Rules: docs/architecture.md, "Worker".
 
-import { adjustSequence, plan, type Clock, type StagedWindow, type CursorAdjustment, type LockConflict, type PlannedSlot, type PlanWarning, type Schedule } from '@daytuner/engine';
+import { adjustSequence, diffSlots, plan, type SlotChange, type Clock, type StagedWindow, type CursorAdjustment, type LockConflict, type PlannedSlot, type PlanWarning, type Schedule } from '@daytuner/engine';
 import { parseScheduleFile, resolveSchedule } from '@daytuner/schedule';
 import type { ChannelRecord, CommitRecord, PinRecord, StagedSlotRecord, Store } from '@daytuner/store';
 import { alignToGrid, appendVerified, toLineupItems, totalDuration, type LineupItem, type TunarrClient } from '@daytuner/tunarr-client';
@@ -259,6 +259,8 @@ export interface StageResult {
   warnings: PlanWarning[];
   /** Readable names for the programs, for showing the slots. */
   titles: Record<string, string>;
+  /** What changed in the kept range compared with what was staged there before. */
+  changes: SlotChange[];
 }
 
 /**
@@ -270,7 +272,7 @@ export interface StageResult {
 export async function stageGenerate(
   deps: Pick<WorkerDeps, 'store' | 'client' | 'clock'>,
   channelName: string,
-  range: { to: number; keepFrom?: number; keepTo?: number },
+  range: { to: number; keepFrom?: number; keepTo?: number; before?: readonly PlannedSlot[] },
 ): Promise<StageResult> {
   const { store, client, clock } = deps;
   const ch = store.channel(channelName);
@@ -284,8 +286,70 @@ export async function stageGenerate(
   const { locked, pins, windows } = stagedInputs(store, ch, from, library, titles);
   const result = plan({ schedule, library, state: ch.state, from, to: range.to, locked, pins, windows });
   const kept = result.slots.filter((s) => s.start >= keepFrom && s.start < keepTo);
+  const before = range.before ?? store.stagedSlots(ch.id, keepFrom, keepTo).map((s) => s.planned);
   store.replaceStaged(channelName, keepFrom, keepTo, kept, clock.now());
-  return { kept, planned: result.slots.length, warnings: result.warnings.filter((w) => kept.some((k) => w.at >= k.start && w.at < k.end)), titles };
+  return { kept, planned: result.slots.length, warnings: result.warnings.filter((w) => kept.some((k) => w.at >= k.start && w.at < k.end)), titles, changes: diffSlots(before, kept) };
+}
+
+export interface StageDiff {
+  /** What the staged slots, with their locks, pins and shapes, change compared with planning the schedule fresh. */
+  changes: SlotChange[];
+  /** Staged slots in the compared range. */
+  staged: number;
+  titles: Record<string, string>;
+}
+
+/**
+ * The effect of everything done by hand: the staged slots as the next commit would plan them, compared with the
+ * same stretch planned from the schedule alone. Writes nothing.
+ */
+export async function stageDiff(deps: Pick<WorkerDeps, 'store' | 'client'>, channelName: string): Promise<StageDiff> {
+  const { store, client } = deps;
+  const ch = store.channel(channelName);
+  if (!ch) throw new ConsistencyError(`no channel named "${channelName}" in the store`);
+  const staged = store.stagedSlots(ch.id);
+  if (staged.length === 0) return { changes: [], staged: 0, titles: {} };
+  const { schedule, library, titles } = await resolveSchedule(parseScheduleFile(ch.schedule), client);
+  const { from } = alignToGrid(ch.edge, schedule.grid);
+  const to = Math.max(...staged.map((s) => s.start)) + 1;
+  const fresh = plan({ schedule, library, state: ch.state, from, to });
+  const { locked, pins, windows } = stagedInputs(store, ch, from, library, titles);
+  const shaped = plan({ schedule, library, state: ch.state, from, to, locked, pins, windows });
+  const first = Math.min(...staged.map((s) => s.start));
+  return { changes: diffSlots(fresh.slots.filter((s) => s.start >= first), shaped.slots.filter((s) => s.start >= first)), staged: staged.length, titles };
+}
+
+export interface RevisionImpact {
+  /** Locked staged slots the new schedule would not let the next commit keep as stored. */
+  conflicts: LockConflict[];
+  /** What the new schedule changes in the staged range, compared with the current one. */
+  changes: SlotChange[];
+  staged: number;
+  titles: Record<string, string>;
+}
+
+/**
+ * A dry run of saving a new schedule text: plans the staged range under the current schedule and under the new
+ * one, with the same locks, pins and shapes, and reports the locked slots that would no longer fit and what moved.
+ * Writes nothing.
+ */
+export async function revisionImpact(deps: Pick<WorkerDeps, 'store' | 'client'>, channelName: string, yaml: string): Promise<RevisionImpact> {
+  const { store, client } = deps;
+  const ch = store.channel(channelName);
+  if (!ch) throw new ConsistencyError(`no channel named "${channelName}" in the store`);
+  const staged = store.stagedSlots(ch.id);
+  const parsed = parseScheduleFile(yaml);
+  const next = await resolveSchedule(parsed, client);
+  if (staged.length === 0) return { conflicts: [], changes: [], staged: 0, titles: next.titles };
+  const current = await resolveSchedule(parseScheduleFile(ch.schedule), client);
+  const to = Math.max(...staged.map((s) => s.start)) + 1;
+  const planUnder = (r: typeof current) => {
+    const { from } = alignToGrid(ch.edge, r.schedule.grid);
+    const { locked, pins, windows } = stagedInputs(store, ch, from, r.library, r.titles);
+    return plan({ schedule: r.schedule, library: r.library, state: ch.state, from, to, locked, pins, windows });
+  };
+  const [a, b] = [planUnder(current), planUnder(next)];
+  return { conflicts: b.conflicts, changes: diffSlots(a.slots, b.slots), staged: staged.length, titles: { ...current.titles, ...next.titles } };
 }
 
 export interface StageCheck {
@@ -323,11 +387,16 @@ export async function stageCheck(deps: Pick<WorkerDeps, 'store' | 'client'>, cha
  * Plans the staged slots again from `from` to the last staged slot, keeping locks, pins and shapes. A change to
  * one slot moves the places of the shows after it, so everything staged after it is planned again too.
  */
-export async function stageRefresh(deps: Pick<WorkerDeps, 'store' | 'client' | 'clock'>, channelName: string, from: number): Promise<StageResult> {
+export async function stageRefresh(
+  deps: Pick<WorkerDeps, 'store' | 'client' | 'clock'>,
+  channelName: string,
+  from: number,
+  before?: readonly PlannedSlot[],
+): Promise<StageResult> {
   const ch = deps.store.channel(channelName);
   if (!ch) throw new ConsistencyError(`no channel named "${channelName}" in the store`);
   const last = Math.max(from, ...deps.store.stagedSlots(ch.id).map((s) => s.start));
-  return stageGenerate(deps, channelName, { to: last + 1, keepFrom: from, keepTo: last + 1 });
+  return stageGenerate(deps, channelName, { to: last + 1, keepFrom: from, keepTo: last + 1, ...(before ? { before } : {}) });
 }
 
 export type StageEdit =
@@ -420,8 +489,9 @@ export async function stageEdit(deps: Pick<WorkerDeps, 'store' | 'client' | 'clo
   }
 
   const first = Math.min(...remove, ...put.keys());
+  const before = rows.filter((r) => r.start >= first).map((r) => r.planned);
   store.restructure(channelName, [...remove], [...put.values()], clock.now());
-  return stageRefresh(deps, channelName, first);
+  return stageRefresh(deps, channelName, first, before);
 }
 
 export interface SequenceInfo {

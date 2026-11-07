@@ -3,12 +3,12 @@
 ```
 daytuner preview <channel.yaml> [--from ISO] [--days N] [--seed N]
 daytuner channel add <channel.yaml> [--channel NAME] [--seed N] [--floor 7d] [--step 24h]
-daytuner channel set-schedule <name> <channel.yaml>      (saves a new revision)
+daytuner channel set-schedule <name> <channel.yaml> [--yes]   (saves a new revision; checks staged slots first)
 daytuner channel revisions <name> | diff <name> [from [to]] | rollback <name> <number>
 daytuner channel list | status <name> | commits <name> | adopt-history <name> [--yes]
 daytuner stage <name> generate --to DATE [--keep DATE..DATE] | show [--from DATE] [--to DATE] | lock DATETIME | unlock DATETIME
                    | pin DATETIME BLOCK movie:TITLE | pin DATETIME BLOCK episode:SHOW/TITLE | unpin DATETIME BLOCK
-                   | delete DATETIME | resize DATETIME --end DATE | add DATETIME --end DATE movie:TITLE | clear [--from DATE] [--to DATE]
+                   | delete DATETIME | resize DATETIME --end DATE | add DATETIME --end DATE movie:TITLE | diff | clear [--from DATE] [--to DATE]
 daytuner run <name> [--yes]
 daytuner cursor <name> list | rewind <sequence> <k> | set <sequence> <episode-number>
 ```

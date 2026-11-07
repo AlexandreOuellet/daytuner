@@ -90,7 +90,7 @@ daytuner stage <channel> clear [--from DATE --to DATE]
 4. **Conflicts.** The validity checks, the regeneration and the log entry came with slice 2 (reasons: `window-changed`,
    `program-gone`, `duration-changed`, `clip-gone`). Regeneration keeps the slot's pins (slice 3). What is left: showing the conflicts a commit would record in `stage show`.
 5. **Structure edits (built).** Delete, add, resize a slot; cutting the neighbours. Tests on the cut rules.
-6. **Preview diff.** What a change did to the slots around it, before commit. Revision dry-run against
+6. **Preview diff (built).** What a change did to the slots around it, before commit. Revision dry-run against
    locked slots (from `architecture.md`).
 
 ## Decided
@@ -120,3 +120,10 @@ daytuner stage <channel> clear [--from DATE --to DATE]
   starts earlier. **Add** takes a start, an end and a pin: it has no pool, only the pinned program (anything else in it
   is filler, then dead air), and slots it overlaps are cut around it, one that contains it split in two.
 - **Any change plans everything staged after it again**, because it moves the places of the shows downstream.
+- **The preview diff** (`SlotChange`, `diffSlots` in the engine) matches slots by where they start and reports only the
+  ones that changed: new, removed, a different window or programs, with before and after and the dead air when it moved by
+  15 s or more. Slots that kept their programs and only had their ads reshuffled are counted, not listed. It is printed
+  after every edit and pin, and by `stage diff`, which compares the staged slots with planning the schedule fresh.
+- **Saving a schedule revision with staged slots** dry-runs it (`revisionImpact`): the staged range planned under the
+  current and the new schedule, with the same locks, pins and shapes. With locked slots that would not fit, nothing is saved
+  until `--yes`; the slots are then planned again at commit time and the log records why.

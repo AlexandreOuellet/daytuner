@@ -13,3 +13,4 @@ export * from './clips.js';
 export * from './schedule.js';
 export * from './plan.js';
 export * from './metrics.js';
+export * from './slotdiff.js';

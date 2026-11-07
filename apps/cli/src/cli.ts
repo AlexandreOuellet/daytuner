@@ -19,8 +19,8 @@ import { alignToGrid, TunarrClient, type FetchLike } from '@daytuner/tunarr-clie
 import { ceilToGrid, computeMetrics, DAY, emptyPlanState, plan, type Clock } from '@daytuner/engine';
 import { diffLines, findProgram, formatDiff, parseDuration, parseLocalDateTime, parseScheduleFile, resolveSchedule } from '@daytuner/schedule';
 import { Store } from '@daytuner/store';
-import { adjustCursor, adoptHistory, ConsistencyError, listSequences, placesFromLineup, resync, stageCheck, stageEdit, stageGenerate, stageRefresh, topUp } from '@daytuner/worker';
-import { formatMetrics, formatWarnings, inZone, slotLabel } from './format.js';
+import { adjustCursor, adoptHistory, ConsistencyError, listSequences, placesFromLineup, resync, revisionImpact, stageCheck, stageDiff, stageEdit, stageGenerate, stageRefresh, topUp } from '@daytuner/worker';
+import { formatChanges, formatMetrics, formatWarnings, inZone, slotLabel } from './format.js';
 
 export interface CliEnv {
   clock: Clock;
@@ -34,12 +34,12 @@ export interface CliEnv {
 const USAGE = `Usage:
   daytuner preview <channel.yaml> [--from ISO] [--days N] [--seed N]
   daytuner channel add <channel.yaml> [--channel NAME] [--seed N] [--floor 7d] [--step 24h]
-  daytuner channel set-schedule <name> <channel.yaml>      (saves a new revision)
+  daytuner channel set-schedule <name> <channel.yaml> [--yes]   (saves a new revision; checks staged slots first)
   daytuner channel revisions <name> | diff <name> [from [to]] | rollback <name> <number>
   daytuner channel list | status <name> | commits <name> | adopt-history <name> [--yes] | resync <name> [--yes]
   daytuner stage <name> generate --to DATE [--keep DATE..DATE] | show [--from DATE] [--to DATE] | lock DATETIME | unlock DATETIME
                    | pin DATETIME BLOCK movie:TITLE | pin DATETIME BLOCK episode:SHOW/TITLE | unpin DATETIME BLOCK
-                   | delete DATETIME | resize DATETIME --end DATE | add DATETIME --end DATE movie:TITLE | clear [--from DATE] [--to DATE]
+                   | delete DATETIME | resize DATETIME --end DATE | add DATETIME --end DATE movie:TITLE | diff | clear [--from DATE] [--to DATE]
                                         (dates are local to the channel: 2026-10-31 or 2026-10-31T20:00)
   daytuner run <name> [--yes]            (a dry run without --yes)
   daytuner cursor <name> list | rewind <sequence> <k> | set <sequence> <episode-number>
@@ -122,11 +122,27 @@ export async function runCli(argv: string[], io: CliEnv): Promise<number> {
       }
       if (sub === 'set-schedule' && a && b) {
         const text = readFileSync(b, 'utf8');
-        await resolveSchedule(parseScheduleFile(text), reader());
+        const client = reader();
+        await resolveSchedule(parseScheduleFile(text), client);
         const store = openStore();
         const before = store.channel(a);
+        if (!before) throw new Error(`no channel named "${a}"`);
+        if (text !== before.schedule) {
+          const zone = parseScheduleFile(text).timezone;
+          const impact = await revisionImpact({ store, client }, a, text);
+          if (impact.staged > 0) {
+            io.out(`Staged slots checked against the new schedule (${impact.staged}):`);
+            io.out(formatChanges(impact.changes, zone, impact.titles, 'The new schedule changes'));
+            for (const c of impact.conflicts) io.out(`CONFLICT: the locked slot at ${inZone(c.start, zone)} no longer fits (${c.reason}): ${c.message}`);
+            if (impact.conflicts.length > 0 && !values.yes) {
+              io.out(`\n${impact.conflicts.length} locked slot(s) would not fit. Nothing was saved. Add --yes to save the new schedule anyway; those slots are then planned again at commit time and the log records why.`);
+              store.close();
+              return 0;
+            }
+          }
+        }
         const number = store.setSchedule(a, text, io.clock.now());
-        io.out(before && number === before.revision ? `The schedule of "${a}" is unchanged (still revision ${number}).` : `Saved revision ${number} of the schedule of "${a}". It takes effect at the next run.`);
+        io.out(number === before.revision ? `The schedule of "${a}" is unchanged (still revision ${number}).` : `Saved revision ${number} of the schedule of "${a}". It takes effect at the next run.`);
         store.close();
         return 0;
       }
@@ -312,14 +328,16 @@ export async function runCli(argv: string[], io: CliEnv): Promise<number> {
         const trouble = r.warnings.filter((w) => w.code === 'pin-does-not-fit' || w.code === 'pin-dropped');
         for (const w of trouble) io.out(`${w.severity.toUpperCase()}: ${w.message}`);
         if (trouble.length === 0) io.out('The pin holds.');
+        io.out(`\n${formatChanges(r.changes, zone, r.titles, 'Changed by this pin')}`);
         store.close();
         return 0;
       }
       if (sub === 'unpin' && rest[2] && rest[3]) {
         const start = parseLocalDateTime(zone, rest[2]);
         store.removePin(name!, start, Number(rest[3]));
-        await stageRefresh({ store, client: reader(), clock: io.clock }, name!, start);
+        const un = await stageRefresh({ store, client: reader(), clock: io.clock }, name!, start);
         io.out(`Removed the pin on block ${rest[3]} of the slot starting ${inZone(start, zone)}. The slot was planned again.`);
+        io.out(`\n${formatChanges(un.changes, zone, un.titles, 'Changed by removing the pin')}`);
         store.close();
         return 0;
       }
@@ -327,7 +345,7 @@ export async function runCli(argv: string[], io: CliEnv): Promise<number> {
         const start = parseLocalDateTime(zone, rest[2]);
         const r = await stageEdit({ store, client: reader(), clock: io.clock }, name!, { kind: 'delete', start });
         io.out(`Deleted the slot starting ${inZone(start, zone)}; the slot before it now runs through its time. Nothing was written to Tunarr.`);
-        io.out(`\n${formatWarnings(r.warnings, zone, r.titles)}`);
+        io.out(`\n${formatChanges(r.changes, zone, r.titles, 'Changed by this edit')}\n\n${formatWarnings(r.warnings, zone, r.titles)}`);
         store.close();
         return 0;
       }
@@ -337,7 +355,7 @@ export async function runCli(argv: string[], io: CliEnv): Promise<number> {
         if (end === undefined) throw new Error('give the new end with --end DATE');
         const r = await stageEdit({ store, client: reader(), clock: io.clock }, name!, { kind: 'resize', start, end });
         io.out(`The slot starting ${inZone(start, zone)} now ends ${inZone(end, zone)}. The slots around it were adjusted so no time is left empty. Nothing was written to Tunarr.`);
-        io.out(`\n${formatWarnings(r.warnings, zone, r.titles)}`);
+        io.out(`\n${formatChanges(r.changes, zone, r.titles, 'Changed by this edit')}\n\n${formatWarnings(r.warnings, zone, r.titles)}`);
         store.close();
         return 0;
       }
@@ -351,7 +369,13 @@ export async function runCli(argv: string[], io: CliEnv): Promise<number> {
         io.out(`Added a slot from ${inZone(start, zone)} to ${inZone(end, zone)} with ${program.title} pinned to block 1. The slots it overlaps were cut around it. Nothing was written to Tunarr.`);
         const trouble = r.warnings.filter((w) => w.code === 'pin-does-not-fit' || w.code === 'pin-dropped');
         for (const w of trouble) io.out(`${w.severity.toUpperCase()}: ${w.message}`);
-        io.out(`\n${formatWarnings(r.warnings.filter((w) => !trouble.includes(w)), zone, r.titles)}`);
+        io.out(`\n${formatChanges(r.changes, zone, r.titles, 'Changed by this edit')}\n\n${formatWarnings(r.warnings.filter((w) => !trouble.includes(w)), zone, r.titles)}`);
+        store.close();
+        return 0;
+      }
+      if (sub === 'diff') {
+        const d = await stageDiff({ store, client: reader() }, name!);
+        io.out(d.staged === 0 ? 'Nothing is staged.' : formatChanges(d.changes, zone, d.titles, 'What staging changes compared with planning the schedule fresh'));
         store.close();
         return 0;
       }

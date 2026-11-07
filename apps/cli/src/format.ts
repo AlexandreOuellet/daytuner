@@ -1,5 +1,5 @@
 // Plain-text output for the CLI.
-import type { Distribution, Metrics, PlanWarning } from '@daytuner/engine';
+import type { Distribution, Metrics, PlanWarning, SlotChange } from '@daytuner/engine';
 
 const f = (n: number, digits = 1): string => n.toFixed(digits);
 const pct = (n: number, digits = 1): string => `${(n * 100).toFixed(digits)}%`;
@@ -66,4 +66,38 @@ export function formatWarnings(warnings: readonly PlanWarning[], zone: string, t
   const lines = sorted.slice(0, max).map((w) => `  [${w.severity}] ${inZone(w.at, zone)} ${slotLabel(w.slotId)}: ${withTitles(w.message, titles)}`);
   if (sorted.length > max) lines.push(`  ... and ${sorted.length - max} more`);
   return `Warnings: ${counts.alert} alert, ${counts.warning} warning, ${counts.info} info\n${lines.join('\n')}`;
+}
+
+const mmss = (ms: number): string => `${Math.floor(ms / 60_000)}:${String(Math.round((ms % 60_000) / 1000)).padStart(2, '0')}`;
+
+/** "Ep 1 .. Ep 20 (20 programs)" for a long list, the titles for a short one, "nothing" for none. */
+function programList(ids: readonly string[], titles: Readonly<Record<string, string>>): string {
+  const name = (id: string): string => titles[id] ?? id;
+  if (ids.length === 0) return 'nothing';
+  if (ids.length <= 3) return ids.map(name).join(', ');
+  return `${name(ids[0]!)} .. ${name(ids[ids.length - 1]!)} (${ids.length} programs)`;
+}
+
+/**
+ * What a change did, slot by slot: only the slots whose programs or window moved, each with before and after and
+ * the dead air when it changed; slots that only had their ads reshuffled are counted, not listed.
+ */
+export function formatChanges(changes: readonly SlotChange[], zone: string, titles: Readonly<Record<string, string>> = {}, heading = 'Changed'): string {
+  const listed = changes.filter((c) => c.kind !== 'ads-only');
+  const adsOnly = changes.length - listed.length;
+  if (listed.length === 0 && adsOnly === 0) return `${heading}: no slot changed.`;
+  const out: string[] = [`${heading} (${listed.length} slot${listed.length === 1 ? '' : 's'}):`];
+  for (const c of listed) {
+    const tag = c.kind === 'new' ? '  [new]' : c.kind === 'removed' ? '  [removed]' : '';
+    const label = c.slotId.startsWith('added@') ? 'added' : slotLabel(c.slotId);
+    out.push('', `  ${inZone(c.start, zone)} to ${inZone(c.end, zone)}  ${label}${tag}`);
+    if (c.endBefore !== undefined) out.push(`    ends:   ${inZone(c.endBefore, zone)} -> ${inZone(c.end, zone)}`);
+    if (c.kind !== 'new') out.push(`    before: ${programList(c.before, titles)}`);
+    if (c.kind !== 'removed') {
+      const dead = Math.abs(c.deadAirAfter - c.deadAirBefore) >= 15_000 ? `      dead air ${mmss(c.deadAirBefore)} -> ${mmss(c.deadAirAfter)}` : '';
+      out.push(`    after:  ${programList(c.after, titles)}${dead}`);
+    }
+  }
+  if (adsOnly > 0) out.push('', `  ${adsOnly} other slot(s) keep their programs; only their ads were reshuffled.`);
+  return out.join('\n');
 }

@@ -293,6 +293,37 @@ describe('the command line', () => {
     expect(said()).toMatch(/2026-11-19 09:00 to 2026-11-19 11:00 +added/); // the freed hour went to the slot after it
   });
 
+  it('shows what an edit changed, what staging changes overall, and checks a new schedule against locked slots', async () => {
+    await run('channel', 'add', join(dir, 'test.yaml'));
+    await run('stage', 'Test', 'generate', '--to', '2026-11-21', '--keep', '2026-11-18..2026-11-21');
+    out.length = 0;
+    await run('stage', 'Test', 'diff');
+    expect(said()).toContain('no slot changed');
+    out.length = 0;
+    await run('stage', 'Test', 'delete', '2026-11-18T20:00');
+    expect(said()).toMatch(/Changed by this edit \(\d+ slots?\):/);
+    expect(said()).toMatch(/\[removed\]/);
+    expect(said()).toMatch(/ends: +2026-11-18 20:00 -> 2026-11-19 08:00/);
+    out.length = 0;
+    await run('stage', 'Test', 'diff');
+    expect(said()).toContain('What staging changes compared with planning the schedule fresh');
+    out.length = 0;
+
+    await run('stage', 'Test', 'lock', '2026-11-19T20:00');
+    const moved = YAML.replaceAll('at: "20:00"', 'at: "21:00"');
+    writeFileSync(join(dir, 'moved.yaml'), moved);
+    out.length = 0;
+    expect(await run('channel', 'set-schedule', 'Test', join(dir, 'moved.yaml'))).toBe(0);
+    expect(said()).toContain('CONFLICT: the locked slot at 2026-11-19 20:00 no longer fits (window-changed)');
+    expect(said()).toContain('Nothing was saved');
+    out.length = 0;
+    await run('channel', 'revisions', 'Test');
+    expect(said()).not.toContain('revision 2');
+    out.length = 0;
+    expect(await run('channel', 'set-schedule', 'Test', join(dir, 'moved.yaml'), '--yes')).toBe(0);
+    expect(said()).toContain('Saved revision 2');
+  });
+
   it('previews without a store', async () => {
     expect(await run('preview', join(dir, 'test.yaml'), '--days', '2', '--from', '2026-11-09T00:00:00Z')).toBe(0);
     expect(said()).toContain('grid accuracy');
