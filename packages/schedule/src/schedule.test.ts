@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { plan, emptyPlanState, toLocalForTest } from './testing.js';
 import { parseScheduleFile, ScheduleFileError } from './file.js';
 import { findProgram, resolveSchedule, ResolveError, same, takeTurns } from './resolve.js';
+import { addIds } from './export.js';
 import { fakeSource } from './testing.js';
 
 const EXAMPLE = readFileSync(new URL('../../../schedules/example.yaml', import.meta.url), 'utf8');
@@ -177,5 +178,33 @@ describe('finding a program by text', () => {
     await expect(findProgram(fakeSource(), 'episode:The Office/Nope')).rejects.toThrow(/no episode titled/);
     await expect(findProgram(fakeSource({ duplicateWho: true }), 'episode:Doctor Who/Halloween Special')).rejects.toThrow(/more than one show/);
     await expect(findProgram(fakeSource(), 'Mid Laughs')).rejects.toThrow(/write movie:Title/);
+  });
+});
+
+describe('exporting a channel file with ids', () => {
+  it('adds the id beside every show and movie title, keeps comments, and the result resolves the same', async () => {
+    const out = await addIds(EXAMPLE, fakeSource());
+    expect(out).toContain('id: show-office');
+    expect(out).toContain('id: show-who'); // the exception's show
+    expect(out).toMatch(/# .*/); // comments survive
+    const again = parseScheduleFile(out);
+    const a = await resolveSchedule(parseScheduleFile(EXAMPLE), fakeSource());
+    const b = await resolveSchedule(again, fakeSource());
+    expect(b.schedule).toEqual(a.schedule);
+    expect(b.notes).toEqual([]);
+  });
+
+  it('leaves a title that already has an id, and is stable when run twice', async () => {
+    const once = await addIds(EXAMPLE, fakeSource());
+    expect(await addIds(once, fakeSource())).toBe(once);
+  });
+
+  it('needs the owner to choose between two shows with the same title', async () => {
+    await expect(addIds(EXAMPLE, fakeSource({ duplicateWho: true }))).rejects.toThrow(/more than one show titled "Doctor Who".*show-who, show-who-2005/);
+  });
+
+  it('says when a title is not in the library, and refuses a file that does not parse', async () => {
+    await expect(addIds(EXAMPLE.replace('Parks and Recreation', 'Ghost Show'), fakeSource())).rejects.toThrow(/no show titled "Ghost Show"/);
+    await expect(addIds('nonsense: true', fakeSource())).rejects.toThrow(/problems/);
   });
 });

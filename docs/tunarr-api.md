@@ -139,3 +139,16 @@ A 3-day plan of four shows on the test copy (Bob's Burgers, Community, Archer, B
 grid) used 72 episodes, 54 of them with chapters. It made 205 mid breaks. Every break inside an episode
 that has chapters (169 of them) sits exactly at a chapter end; the other 36 are in episodes with none (all
 of Brooklyn Nine-Nine and some others), and use the every-N-minutes offers.
+
+## What an id is
+
+The ids DayTuner writes into a channel file (`show: ..., id: ...`) are **Tunarr's own program ids**: the `uuid` that
+Tunarr's search returns, the `id` of a content item in a lineup, and the id in `/api/programs/{id}/descendants`. They are
+UUIDs that Tunarr makes when it first imports a program from a media source, and they live in that Tunarr's database.
+They are not Jellyfin's ids (Jellyfin's item id is only visible inside a program's stream details, and DayTuner never
+uses it).
+
+So an id belongs to **one Tunarr instance**: a copy of its data (such as the test copy) has the same ids, but a fresh
+Tunarr that re-imports the same Jellyfin library gets new ones. A channel file with ids is therefore not portable to
+another Tunarr; the title label next to each id is what a person reads, and deleting the ids gives a file that matches
+by title anywhere.

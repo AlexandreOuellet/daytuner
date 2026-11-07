@@ -4,6 +4,7 @@
 daytuner preview <channel.yaml> [--from ISO] [--days N] [--seed N]
 daytuner channel add <channel.yaml> [--channel NAME] [--seed N] [--floor 7d] [--step 24h]
 daytuner channel set-schedule <name> <channel.yaml> [--yes]   (saves a new revision; checks staged slots first)
+daytuner channel export <name> [--out FILE]      (the current schedule with ids beside every title)
 daytuner channel revisions <name> | diff <name> [from [to]] | rollback <name> <number>
 daytuner channel list | status <name> | commits <name> | adopt-history <name> [--yes]
 daytuner stage <name> generate --to DATE [--keep DATE..DATE] | show [--from DATE] [--to DATE] | lock DATETIME | unlock DATETIME

@@ -11,13 +11,13 @@
 //   cursor <name> rewind <sequence> <k>         for a missed week
 //   cursor <name> set <sequence> <episode-number>
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { parseArgs } from 'node:util';
 import { alignToGrid, TunarrClient, type FetchLike } from '@daytuner/tunarr-client';
 import { ceilToGrid, computeMetrics, DAY, emptyPlanState, plan, type Clock } from '@daytuner/engine';
-import { diffLines, findProgram, formatDiff, parseDuration, parseLocalDateTime, parseScheduleFile, resolveSchedule } from '@daytuner/schedule';
+import { addIds, diffLines, findProgram, formatDiff, parseDuration, parseLocalDateTime, parseScheduleFile, resolveSchedule } from '@daytuner/schedule';
 import { Store } from '@daytuner/store';
 import { adjustCursor, adoptHistory, ConsistencyError, listSequences, placesFromLineup, resync, revisionImpact, stageCheck, stageDiff, stageEdit, stageGenerate, stageRefresh, topUp } from '@daytuner/worker';
 import { formatChanges, formatMetrics, formatWarnings, inZone, slotLabel } from './format.js';
@@ -35,6 +35,7 @@ const USAGE = `Usage:
   daytuner preview <channel.yaml> [--from ISO] [--days N] [--seed N]
   daytuner channel add <channel.yaml> [--channel NAME] [--seed N] [--floor 7d] [--step 24h]
   daytuner channel set-schedule <name> <channel.yaml> [--yes]   (saves a new revision; checks staged slots first)
+  daytuner channel export <name> [--out FILE]      (the current schedule with ids beside every title)
   daytuner channel revisions <name> | diff <name> [from [to]] | rollback <name> <number>
   daytuner channel list | status <name> | commits <name> | adopt-history <name> [--yes] | resync <name> [--yes]
   daytuner stage <name> generate --to DATE [--keep DATE..DATE] | show [--from DATE] [--to DATE] | lock DATETIME | unlock DATETIME
@@ -55,7 +56,7 @@ export async function runCli(argv: string[], io: CliEnv): Promise<number> {
     options: {
       tunarr: { type: 'string' }, db: { type: 'string' }, channel: { type: 'string' }, from: { type: 'string' },
       days: { type: 'string', default: '7' }, seed: { type: 'string', default: '1' },
-      to: { type: 'string' }, keep: { type: 'string' }, end: { type: 'string' },
+      to: { type: 'string' }, keep: { type: 'string' }, end: { type: 'string' }, out: { type: 'string' },
       floor: { type: 'string', default: '7d' }, step: { type: 'string', default: '24h' }, yes: { type: 'boolean', default: false },
     },
   });
@@ -143,6 +144,20 @@ export async function runCli(argv: string[], io: CliEnv): Promise<number> {
         }
         const number = store.setSchedule(a, text, io.clock.now());
         io.out(number === before.revision ? `The schedule of "${a}" is unchanged (still revision ${number}).` : `Saved revision ${number} of the schedule of "${a}". It takes effect at the next run.`);
+        store.close();
+        return 0;
+      }
+      if (sub === 'export' && a) {
+        const store = openStore();
+        const ch = store.channel(a);
+        if (!ch) throw new Error(`no channel named "${a}"`);
+        const text = await addIds(ch.schedule, reader());
+        if (values.out) {
+          writeFileSync(values.out, text);
+          io.out(`Wrote revision ${ch.revision} of "${a}" to ${values.out}, with the library's id beside every show and movie.`);
+        } else {
+          io.out(text.replace(/\n$/, ''));
+        }
         store.close();
         return 0;
       }

@@ -324,6 +324,22 @@ describe('the command line', () => {
     expect(said()).toContain('Saved revision 2');
   });
 
+  it('exports the current schedule with the library ids beside the titles', async () => {
+    await run('channel', 'add', join(dir, 'test.yaml'));
+    out.length = 0;
+    expect(await run('channel', 'export', 'Test')).toBe(0);
+    expect(said()).toContain('id: show-a');
+    expect(said()).toContain('channel: Test');
+    expect(await run('channel', 'export', 'Test', '--out', join(dir, 'exported.yaml'))).toBe(0);
+    // The exported file is a valid channel file that can replace the stored one without changing what it plans.
+    out.length = 0;
+    expect(await run('channel', 'set-schedule', 'Test', join(dir, 'exported.yaml'))).toBe(0);
+    expect(said()).toContain('Saved revision 2');
+    out.length = 0;
+    await run('channel', 'diff', 'Test');
+    expect(said()).toMatch(/\+ .*id: show-a/);
+  });
+
   it('previews without a store', async () => {
     expect(await run('preview', join(dir, 'test.yaml'), '--days', '2', '--from', '2026-11-09T00:00:00Z')).toBe(0);
     expect(said()).toContain('grid accuracy');
