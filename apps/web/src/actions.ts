@@ -152,7 +152,11 @@ export function registerActions(app: Hono, d: ActionDeps): void {
       const end = when(zone, b, 'end')!;
       const spec = b['program'];
       return job(c, ch.name, 'add slot', async () => {
-        const pin = typeof spec === 'string' ? await findProgram(d.client, spec) : undefined;
+        const o = spec as Partial<PinRecord> | null;
+        const pin: PinRecord | undefined =
+          typeof spec === 'string' ? await findProgram(d.client, spec)
+          : o && typeof o === 'object' && typeof o.id === 'string' && typeof o.duration === 'number' ? { id: o.id, title: String(o.title ?? o.id), duration: o.duration }
+          : undefined;
         return stageOut(await stageEdit(deps, ch.name, { kind: 'add', start, end, ...(pin ? { pin } : {}) }));
       });
     } else throw new BadRequest('"kind" is delete, resize or add');

@@ -71,6 +71,20 @@ export interface ScheduleModel { timezone: string; grid: number; week: SlotModel
 export interface PoolStats { count: number; durations: number[]; error?: string }
 export interface Library { shows: { id: string; title: string }[]; genres: string[] }
 
+export interface StagedSlot {
+  start: number; end: number; slotId: string | null; pool: string | null;
+  pins: Record<string, { id: string; title: string; duration: number }>;
+  locked: boolean; edited: boolean; programs: string[];
+  blocks: { programId: string; start: number; end: number; pinned?: boolean }[];
+}
+export interface SlotChange {
+  start: number; end: number; slotId: string; kind: 'new' | 'removed' | 'changed' | 'ads-only';
+  before: string[]; after: string[]; endBefore?: number; deadAirBefore: number; deadAirAfter: number;
+}
+export interface StageWarning { code: string; severity: 'info' | 'warning' | 'alert'; at: number; slotId: string; message: string }
+export interface StageOut { staged: number; planned: number; warnings: StageWarning[]; changes: SlotChange[]; titles: Record<string, string> }
+export interface StageCheck { conflicts: { start: number; slotId: string; reason: string; message: string }[]; pinProblems: StageWarning[]; titles: Record<string, string> }
+
 export class ApiError extends Error {
   constructor(readonly status: number, message: string) {
     super(message);
@@ -128,5 +142,17 @@ export const api = {
   specialDays: (name: string, exceptions: ExceptionModel[], week: SlotModel[]) => post<Occurrence[]>(`/api/channels/${encodeURIComponent(name)}/special-days`, { exceptions, week }),
   movies: (q: string) => get<{ id: string; title: string; duration: number }[]>(`/api/library/movies?q=${encodeURIComponent(q)}`),
   episodes: (showId: string) => get<{ id: string; title: string; season: number; episode: number; duration: number }[]>(`/api/library/shows/${encodeURIComponent(showId)}/episodes`),
+  staged: (name: string) => get<StagedSlot[]>(`/api/channels/${encodeURIComponent(name)}/staged`),
+  stageCheck: (name: string) => runJob<StageCheck>(`/api/channels/${encodeURIComponent(name)}/stage/check`, {}),
+  stageGenerate: (name: string, to: number | string, keepFrom?: number | string, keepTo?: number | string) =>
+    runJob<StageOut>(`/api/channels/${encodeURIComponent(name)}/stage/generate`, { to, ...(keepFrom !== undefined ? { keepFrom } : {}), ...(keepTo !== undefined ? { keepTo } : {}) }),
+  lockSlot: (name: string, start: number, locked: boolean) => post<{ ok: boolean }>(`/api/channels/${encodeURIComponent(name)}/stage/lock`, { start, locked }),
+  /** Times are epoch milliseconds or a local date-time of the channel ("2026-10-31T20:00"). */
+  stageEdit: (name: string, body: { kind: 'delete' | 'resize' | 'add'; start: number | string; end?: number | string; program?: string | { id: string; title: string; duration: number } }) =>
+    runJob<StageOut>(`/api/channels/${encodeURIComponent(name)}/stage/edit`, body),
+  pin: (name: string, start: number, block: number, program: string | { id: string; title: string; duration: number }) =>
+    runJob<StageOut>(`/api/channels/${encodeURIComponent(name)}/stage/pin`, { start, block, program }),
+  unpin: (name: string, start: number, block: number) => runJob<StageOut>(`/api/channels/${encodeURIComponent(name)}/stage/unpin`, { start, block }),
+  resetStage: (name: string, from: number, to: number) => runJob<StageOut>(`/api/channels/${encodeURIComponent(name)}/stage/reset`, { from, to }),
   runs: (name: string) => get<Run[]>(`/api/channels/${encodeURIComponent(name)}/runs`),
 };

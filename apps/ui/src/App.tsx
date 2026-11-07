@@ -5,6 +5,7 @@ import { Cursors } from './pages/Cursors';
 import { Dashboard } from './pages/Dashboard';
 import { Schedule } from './pages/Schedule';
 import { SpecialDays } from './pages/SpecialDays';
+import { Staging } from './pages/Staging';
 import { useRoute } from './router';
 import { useLoad } from './useLoad';
 
@@ -24,7 +25,7 @@ export function App() {
       </header>
       <main>
         {server.error && <p className="error" role="alert">Cannot reach the DayTuner server: {server.error}</p>}
-        {route.page === 'dashboard' ? <Dashboard /> : route.page === 'cursors' ? <Cursors name={route.name} /> : route.page === 'ads' ? <Ads name={route.name} /> : route.page === 'schedule' ? <Schedule name={route.name} /> : route.page === 'special' ? <SpecialDays name={route.name} /> : <Channel name={route.name} />}
+        {route.page === 'dashboard' ? <Dashboard /> : route.page === 'cursors' ? <Cursors name={route.name} /> : route.page === 'ads' ? <Ads name={route.name} /> : route.page === 'schedule' ? <Schedule name={route.name} /> : route.page === 'special' ? <SpecialDays name={route.name} /> : route.page === 'staging' ? <Staging name={route.name} {...(route.date ? { date: route.date } : {})} /> : <Channel name={route.name} />}
       </main>
     </>
   );

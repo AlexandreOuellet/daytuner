@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { api, type ExceptionModel, type Library, type Occurrence, type SaveResult, type ScheduleModel } from '../api';
 import { MONTHS, dateText, fallsOn, monthWeeks, monthsFrom, playName, weekdayOf } from '../calendar';
 import { clock, inZone } from '../format';
-import { channelLink } from '../router';
+import { channelLink, stagingLink } from '../router';
 import { useLoad } from '../useLoad';
 import { DAY_NAMES } from '../week';
 
@@ -61,7 +61,7 @@ export function SpecialDays({ name }: { name: string }) {
     <section>
       <p><a href={channelLink(name)}>← {name}</a></p>
       <div className="page-head"><h1>Special days</h1></div>
-      <p className="muted">A special day replaces one slot with one chosen program. Pick a day to add one. For a bigger event (several programs, a different length), plan the day in staging instead: <code>daytuner stage {name} generate</code>, then edit it there; staging never changes the schedule.</p>
+      <p className="muted">A special day replaces one slot with one chosen program. Pick a day to add one. For a bigger event (several programs, a different length), plan the day in staging instead: staging never changes the schedule.</p>
       {error && <p className="error" role="alert">{error}</p>}
       <ul className="legend" aria-label="Legend">
         {(['rule', 'staged', 'committed'] as const).map((s) => <li key={s}><span aria-hidden="true">{MARK[s]}</span> {STATE[s]}</li>)}
@@ -94,7 +94,7 @@ export function SpecialDays({ name }: { name: string }) {
 
       {picked ? (
         <DayPanel
-          date={picked} model={model} library={library.data} existing={onDay(picked)}
+          name={name} date={picked} model={model} library={library.data} existing={onDay(picked)}
           onAdd={(e) => edit((d) => [...d, e])}
           onRemove={(i) => edit((d) => d.filter((_, j) => j !== i))}
           onChange={(i, e) => edit((d) => d.map((x, j) => (j === i ? e : x)))}
@@ -118,8 +118,8 @@ export function SpecialDays({ name }: { name: string }) {
   );
 }
 
-function DayPanel({ date, model, library, existing, onAdd, onRemove, onChange }: {
-  date: string; model: ScheduleModel; library: Library | undefined; existing: { e: ExceptionModel; i: number; o?: Occurrence }[];
+function DayPanel({ name, date, model, library, existing, onAdd, onRemove, onChange }: {
+  name: string; date: string; model: ScheduleModel; library: Library | undefined; existing: { e: ExceptionModel; i: number; o?: Occurrence }[];
   onAdd: (e: ExceptionModel) => void; onRemove: (i: number) => void; onChange: (i: number, e: ExceptionModel) => void;
 }) {
   const [y, m, d] = date.split('-').map(Number) as [number, number, number];
@@ -163,6 +163,7 @@ function DayPanel({ date, model, library, existing, onAdd, onRemove, onChange }:
   return (
     <div className="editor" aria-label={`Special days on ${date}`}>
       <h2>{DAY_NAMES[weekday]} {date}</h2>
+      <p><a href={stagingLink(name, date)}>Plan this day in staging</a></p>
       {existing.length === 0 && <p className="muted">Nothing special is planned on this day.</p>}
       {existing.map(({ e, i, o }) => (
         <div key={i} className="special">

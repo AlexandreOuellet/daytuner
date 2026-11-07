@@ -19,4 +19,6 @@ The schedule designer is built for the week and the pools (a week grid with drag
 
 The special days page is built (a calendar of the coming year, with each day's state, adding a movie or an episode, every year or this year only).
 
-To build: the staging editor (see `docs/status.md`).
+The staging editor is built too (a day timeline with the slots and their programs, drag or type to resize, locks, pins through a search, add and delete, reset, and a panel of what each change did).
+
+All five pages designed in `docs/web-*.md` are built. What is left is in `docs/status.md`.

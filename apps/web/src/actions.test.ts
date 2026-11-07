@@ -122,6 +122,17 @@ describe('actions', () => {
     expect((await t.get('/api/channels/Test/staged')).body).toEqual([]);
   });
 
+  it('adds a slot with a program given as an object, and times given as local date-times', async () => {
+    const edge = t.store.channel('Test')!.edge;
+    await t.job('/api/channels/Test/stage/generate', { to: edge + 4 * DAY });
+    const big = (await t.get('/api/channels/Test/staged')).body.find((s: any) => s.end - s.start >= 6 * 60 * MIN && s.start > edge + 30 * MIN);
+    const local = (ms: number) => new Date(ms - 5 * 3_600_000).toISOString().slice(0, 16); // Toronto in November is UTC-5
+    const r = await t.job('/api/channels/Test/stage/edit', { kind: 'add', start: local(big.start + 60 * MIN), end: local(big.start + 120 * MIN), program: { id: 'ep11', title: 'Show A "Ep 11"', duration: 22 * MIN + 1000 } });
+    expect(r.state, r.message).toBe('done');
+    const rows = (await t.get('/api/channels/Test/staged')).body;
+    expect(rows.find((s: any) => s.start === big.start + 60 * MIN)).toMatchObject({ pins: { '1': { id: 'ep11' } }, programs: ['ep11'] });
+  });
+
   it('takes local dates as well as epoch milliseconds, and rejects nonsense', async () => {
     const r = await t.job('/api/channels/Test/stage/generate', { to: '2026-11-12', keepFrom: '2026-11-11', keepTo: '2026-11-12' });
     expect(r.state, r.message).toBe('done');

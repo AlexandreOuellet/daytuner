@@ -141,3 +141,23 @@ button.primary { background: var(--accent); color: var(--bg); border-color: var(
 .daycell .star { position: absolute; top: -1px; right: 1px; font-size: .6rem; }
 .special { border-top: 1px solid var(--line); padding-top: 6px; width: 100%; } .special p { margin: 2px 0; }
 .editor h3 { margin: 6px 0 0; font-size: .95rem; }
+
+.stage-range { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin: 10px 0; }
+.stage-range input, .picker select, .picker input, .editor input[type=datetime-local] { font: inherit; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); }
+.daystrip { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 0; }
+.daystrip button { padding: 3px 9px; font-size: .85rem; } .daystrip button.on { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+.daytl { display: grid; grid-template-columns: 44px 1fr; gap: 4px; margin: 8px 0; max-width: 760px; }
+.daycol.wide { min-width: 0; }
+.stslot { position: absolute; left: 2px; right: 2px; border: 1px solid var(--accent); border-radius: 6px; background: color-mix(in srgb, var(--accent) 10%, var(--surface)); overflow: hidden; display: flex; flex-direction: column; }
+.stslot.locked { border-style: double; border-width: 3px; } .stslot.carry { opacity: .6; border-style: dashed; } .stslot.picked { outline: 2px solid var(--ink); z-index: 2; }
+.stslot.problem { border-color: var(--warn); }
+.stslot-head { all: unset; cursor: pointer; font-size: .75rem; padding: 3px 28px 3px 6px; color: var(--ink); background: color-mix(in srgb, var(--accent) 16%, var(--surface)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stslot-head:focus-visible { outline: 2px solid var(--accent); }
+.padlock { all: unset; position: absolute; top: 1px; right: 4px; cursor: pointer; font-size: .85rem; } .padlock:disabled { opacity: .5; cursor: default; }
+.blocks { position: relative; flex: 1; }
+.blk { all: unset; box-sizing: border-box; position: absolute; left: 4px; right: 4px; cursor: pointer; font-size: .72rem; padding: 2px 6px; background: var(--surface); border: 1px solid var(--line); border-radius: 4px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--ink); }
+.blk.pinned { border-color: var(--warn); } .blk.picked { outline: 2px solid var(--accent); } .blk:focus-visible { outline: 2px solid var(--accent); }
+.handle.bottom { top: auto; bottom: 0; background: linear-gradient(to top, color-mix(in srgb, var(--ink) 25%, transparent), transparent); }
+.blockpanel { border-top: 1px solid var(--line); padding-top: 8px; width: 100%; } .blockpanel h3 { margin: 0 0 6px; font-size: .95rem; }
+.changes { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 14px; margin: 14px 0; } .changes h3 { margin: 0 0 6px; font-size: 1rem; }
+.changes ul { list-style: none; padding: 0; margin: 0; } .changes li { padding: 5px 0; border-bottom: 1px solid var(--line); }

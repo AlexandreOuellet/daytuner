@@ -40,7 +40,21 @@ when writing is switched on).
   this day" stages the day again from the schedule. A locked slot is reset only after it is unlocked. There is no undo
   history because every edit plans everything after it again.
 
-## To build for this page
+## Built (`apps/ui/src/pages/Staging.tsx`)
+
+One local day at a time on a time axis (starting a little before the first slot, on a three-hour line), with a strip of the staged days
+and previous and next. A staged slot is a box with its programs inside, drawn to scale, a padlock, and a handle on its bottom edge. A
+slot that began the day before is drawn faded and dashed at the top; a locked slot has a double border. Dragging the bottom edge (snapped
+to the grid) or typing a new end resizes; the padlock locks; a selected slot can be deleted or reset to the plan. A block can be pinned
+through "Replace with…" (a movie by title, or a show and an episode) and unpinned; "Add…" makes a special slot from a start, an end and a
+program; a field stages the days up to a date; "Reset this day" puts the day's unlocked slots back to the plan. A slot with a conflict or a
+pin problem is marked and says what it is. After each change a panel shows the slots that changed, before and after, the count of slots
+that only had their ads reshuffled, and the alerts. A locked slot refuses a change and says to unlock it. Every change is a job, one at a
+time, and the page says what it is working on.
+
+The special days page links to it ("Plan this day in staging", opening on that date).
+
+## Backend pieces this page needed
 
 - **Reset** is built (`stageReset` in the worker and `POST .../stage/reset`): it clears the unlocked staged slots in a range, plans
   them again from the schedule, and plans everything staged after them again. A slot's own span resets that slot; a day's
