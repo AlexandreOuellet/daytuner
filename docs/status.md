@@ -15,7 +15,7 @@ are in [`roadmap.md`](roadmap.md); verified Tunarr facts are in [`tunarr-api.md`
 | 4 Schedules and staging | built, verified on the test copy | Design settled (architecture.md, "Phase 4 storage"). Revisions and all six slices of staging (store, `stage generate|show|clear|lock|unlock|pin|unpin`, locked slots committed as stored, lock conflicts, pins, conflicts shown by `stage show`, `stage delete|resize|add`) built), the preview diff and the revision dry-run against locked slots built; staging was run on the test copy and a locked, a pinned and an added slot were committed and read back identical (see `tunarr-api.md`) |
 | 5 Web interface | not started | Needs design first |
 
-Tests: 358 pass across the engine, client, store, schedule, worker and CLI, plus 3 client integration
+Tests: 362 pass across the engine, client, store, schedule, worker and CLI, plus 3 client integration
 tests that run only against a real Tunarr (`TUNARR_URL`).
 
 ## Needed for 1.0
@@ -39,7 +39,7 @@ Nothing is pushed publicly until all of this is done (see the roadmap).
 - [x] YAML export (`channel export <name> [--out FILE]`: the current schedule with the library's id beside every show and movie title; import is `channel add` and `channel set-schedule`)
 
 **Phase 5: web interface**
-- [ ] The server and its architecture (`web-architecture.md`): TypeScript server plus React app, no login, one process and container. Built so far (`apps/web`): the Hono server, the read-only API, the job runner, and the write API (add channel, stage generate / lock / pin / edit / reset / check / diff, schedule check and save, rollback, cursors, run, resync, adopt-history, export), with writing to Tunarr off unless switched on. To build: the cursor preview call, the commit-metrics storage, the scheduler, the pages
+- [ ] The server and its architecture (`web-architecture.md`): TypeScript server plus React app, no login, one process and container. Built so far (`apps/web`): the Hono server, the read-only API, the job runner, and the write API (add channel, stage generate / lock / pin / edit / reset / check / diff, schedule check and save, rollback, cursors, run, resync, adopt-history, export), with writing to Tunarr off unless switched on. Also built: the daily scheduler (a timer in the process, only when writing is on), metrics stored per commit, targets and health, the dashboard's API. To build: the cursor preview call and the pages
 - [ ] Plain configuration of ads, bumpers and filler: the main complaint about Tunarr (designed in `web-ads.md`, not built)
 - [ ] Edit schedules, preview, see what is scheduled, link to the channel in Tunarr (the schedule designer is designed in `web-schedule.md`: week grid, drag and type, a Pools panel, a calendar of special days; not built)
 - [ ] Stage a date range, edit a day in staging (delete, add, resize slots, pin programs), re-plan only what changed (designed in `web-staging.md`: a day timeline, edits on the blocks with a search panel, reset a slot or a day; not built)
@@ -69,7 +69,7 @@ Each is one of: **build** (clear what to do), **verify** (find out), **know** (a
 
 - **know** Chapters are cached in the store (`chapter_cache`), keyed by program id: a cached list is used while the program's length is unchanged and it is under 30 days old, and "has none" is cached too. On the test copy a staging command took 50 s the first time and 7 s after. `daytuner chapters clear` forgets them, for example after the library is scanned again. A program whose chapters cannot be read plans with the every-N-minutes offers, with a note, and is not cached.
 - **know** `channel add` shows where each ordered show stands in the channel's existing lineup, and `channel adopt-history` applies it (the last item of the pool in the lineup decides, so a trailing rerun can pull the place back; `cursor set` fixes one). Only for a channel DayTuner has not written to.
-- **build** The metrics are not stored over time, which the dashboard needs (storage designed in `web-dashboard.md`: a `commit_metrics` row per commit, and targets per channel).
+- **know** Metrics are stored per commit (`commit_metrics`), with the alerts and warnings of what was written; commits made before this, and commits settled by a recovery, have none.
 - **verify** Playback of ad and filler clips and the media server's guide (phase 3, above).
 - **know** A lineup whose end is fractional (older lineups) gets one rounded flex to the next grid
   line, so it stays up to half a millisecond off the grid from there on.

@@ -4,8 +4,8 @@
 import { Hono } from 'hono';
 import type { Clock } from '@daytuner/engine';
 import { diffLines, parseScheduleFile, ScheduleFileError } from '@daytuner/schedule';
-import { StoreError, type ChannelRecord, type Store } from '@daytuner/store';
-import { ConsistencyError } from '@daytuner/worker';
+import { StoreError, type ChannelRecord, type Store, type Targets } from '@daytuner/store';
+import { ConsistencyError, evaluateHealth } from '@daytuner/worker';
 import { ResolveError } from '@daytuner/schedule';
 import type { TunarrClient } from '@daytuner/tunarr-client';
 import { BadRequest, Forbidden, registerActions } from './actions.js';
@@ -60,6 +60,7 @@ export function createApp(deps: AppDeps): Hono {
     aheadMs: ch.edge - clock.now(),
     pendingCommit: store.pendingCommit(ch.id) !== undefined,
     staged: store.stagedSlots(ch.id).length,
+    runAtMinutes: ch.runAtMinutes,
   });
 
   app.onError((e, c) => {
@@ -126,6 +127,46 @@ export function createApp(deps: AppDeps): Hono {
   app.get('/api/channels/:name/commits', (c) => {
     const ch = channel(c.req.param('name'));
     return c.json(store.commits(ch.id, number(c.req.query('limit'), 'limit') ?? 20).map(({ state: _state, ...rest }) => rest));
+  });
+
+  const health = (ch: ChannelRecord) =>
+    evaluateHealth({ channel: ch, last: store.commitMetrics(ch.id, 1)[0], lastRun: store.lastRuns(ch.id, 1)[0], clock });
+
+  /** One card per channel for the dashboard's first screen. */
+  app.get('/api/dashboard', (c) => c.json(store.channels().map((ch) => ({ ...summary(ch), health: health(ch) }))));
+
+  app.get('/api/channels/:name/health', (c) => c.json(health(channel(c.req.param('name')))));
+
+  /** One point per commit that has metrics, oldest first. */
+  app.get('/api/channels/:name/metrics', (c) => {
+    const ch = channel(c.req.param('name'));
+    return c.json(store.commitMetrics(ch.id, number(c.req.query('limit'), 'limit') ?? 100));
+  });
+
+  app.get('/api/channels/:name/runs', (c) => c.json(store.lastRuns(channel(c.req.param('name')).id, number(c.req.query('limit'), 'limit') ?? 10)));
+
+  app.get('/api/channels/:name/targets', (c) => c.json(channel(c.req.param('name')).targets));
+
+  app.post('/api/channels/:name/targets', async (c) => {
+    const ch = channel(c.req.param('name'));
+    const b = (await c.req.json().catch(() => undefined)) as Record<string, unknown> | undefined;
+    if (!b || typeof b !== 'object' || Array.isArray(b)) throw new BadRequest('the request needs a JSON object as its body');
+    return c.json(store.setTargets(ch.name, b as Partial<Targets>));
+  });
+
+  /** The floor, the step and the time of the daily run. `runAt` is "HH:MM" in the schedule's own zone. */
+  app.post('/api/channels/:name/settings', async (c) => {
+    const ch = channel(c.req.param('name'));
+    const b = (await c.req.json().catch(() => undefined)) as Record<string, unknown> | undefined;
+    if (!b || typeof b !== 'object' || Array.isArray(b)) throw new BadRequest('the request needs a JSON object as its body');
+    const m = typeof b['runAt'] === 'string' ? /^(\d{1,2}):(\d{2})$/.exec(b['runAt']) : null;
+    if (b['runAt'] !== undefined && !m) throw new BadRequest('"runAt" must be a time like 03:00');
+    store.setSettings(ch.name, {
+      ...(typeof b['floorMs'] === 'number' ? { floorMs: b['floorMs'] } : {}),
+      ...(typeof b['stepMs'] === 'number' ? { stepMs: b['stepMs'] } : {}),
+      ...(m ? { runAtMinutes: Number(m[1]) * 60 + Number(m[2]) } : {}),
+    });
+    return c.json(summary(channel(ch.name)));
   });
 
   app.get('/api/jobs', (c) => c.json(jobs.list()));

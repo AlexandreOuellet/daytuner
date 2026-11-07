@@ -23,7 +23,19 @@ only this machine can reach it), `DAYTUNER_PORT` (default 8420), `DAYTUNER_ALLOW
 | `GET /api/channels/:name/diff?from=&to=` | a line diff of two revisions (default: previous to current) |
 | `GET /api/channels/:name/staged?from=&to=&items=1` | staged slots, with locks, pins and blocks (items on request) |
 | `GET /api/channels/:name/commits?limit=` | the commit log |
+| `GET /api/dashboard` | a card per channel: the summary plus its health (checks against its targets) |
+| `GET /api/channels/:name/health`, `/metrics?limit=`, `/runs?limit=` | the checks; one metrics point per commit (oldest first); how the last runs ended |
+| `GET /api/channels/:name/targets`, `POST` | what good looks like (dead air, ad load, end-of-slot wait, alerts, repeats); `POST` changes some |
+| `POST /api/channels/:name/settings` | `{ floorMs?, stepMs?, runAt? }`: `runAt` is `"HH:MM"` in the schedule's own zone |
 | `GET /api/jobs`, `/api/jobs/:id` | jobs: one running per channel at a time |
+
+### The daily run
+
+When the server is started with `DAYTUNER_ALLOW_WRITES=1` it also runs a timer: every minute it starts the worker for each
+channel whose daily run has come due (at its `runAt`, default 03:00, in the schedule's zone) and has not been tried since. It
+uses the same jobs as a manual run, so a channel is never run twice at once, and records how each run ended (shown by
+`/runs` and on the dashboard). A run that failed or was refused is not tried again until the next day. After a restart a
+missed run is made up. With writing off there is no timer.
 
 ### Calls that change things
 

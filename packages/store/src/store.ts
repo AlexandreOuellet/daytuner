@@ -3,7 +3,45 @@
 // the store never reads the clock.
 
 import { DatabaseSync } from 'node:sqlite';
-import type { PlannedSlot, PlanState } from '@daytuner/engine';
+import type { Metrics, PlannedSlot, PlanState } from '@daytuner/engine';
+
+/** What good looks like for a channel, for the dashboard's health cards. */
+export interface Targets {
+  /** The most dead air, as a share of air time. */
+  deadAirMaxShare: number;
+  /** The ad load around a show (the median of pre + mid + post over its length) must lie in this range; null: the schedule's own ratio. */
+  adLoadRange: { min: number; max: number } | null;
+  /** The 90th percentile of the wait at the end of a slot, in minutes. */
+  endOfSlotP90MaxMinutes: number;
+  /** Alerts allowed in the last commit. */
+  maxAlerts: number;
+  /** Repeats of an ordered show's cycle allowed. */
+  maxRepeats: number;
+}
+
+export const DEFAULT_TARGETS: Targets = { deadAirMaxShare: 0.005, adLoadRange: null, endOfSlotP90MaxMinutes: 30, maxAlerts: 0, maxRepeats: 0 };
+
+/** What is kept about a commit for the dashboard. */
+export interface CommitMetricsRecord {
+  commitId: number;
+  /** When the commit was completed. */
+  at: number;
+  fromEdge: number;
+  toEdge: number;
+  metrics: Metrics;
+  alerts: number;
+  warnings: number;
+}
+
+export type RunOutcome = 'appended' | 'nothing-to-do' | 'refused' | 'failed' | 'skipped';
+
+export interface RunRecord {
+  id: number;
+  channelId: number;
+  at: number;
+  outcome: RunOutcome;
+  message: string;
+}
 
 export interface ChannelRecord {
   id: number;
@@ -18,6 +56,9 @@ export interface ChannelRecord {
   schedule: string;
   /** The number of the current revision (1 for the first). */
   revision: number;
+  /** When the scheduled run happens, in minutes after local midnight in the schedule's zone. */
+  runAtMinutes: number;
+  targets: Targets;
   state: PlanState;
   /** Where the committed lineup ends, as Tunarr reported it (it can carry a fraction). */
   edge: number;
@@ -33,6 +74,7 @@ export interface NewChannel {
   edge: number;
   /** When the channel is added; recorded as the first revision's time. */
   at?: number;
+  runAtMinutes?: number;
 }
 
 /** One saved version of a channel's schedule. Revisions are never edited or removed. */
@@ -138,6 +180,8 @@ create table if not exists channels (
   step_ms integer not null,
   schedule text not null,
   revision integer not null default 1,
+  run_at_minutes integer not null default 180,
+  targets text,
   state text not null,
   edge real not null
 );
@@ -191,6 +235,19 @@ create table if not exists chapter_cache (
   chapters text not null,
   fetched_at integer not null
 );
+create table if not exists commit_metrics (
+  commit_id integer primary key references commits(id),
+  metrics text not null,
+  alerts integer not null,
+  warnings integer not null
+);
+create table if not exists channel_runs (
+  id integer primary key autoincrement,
+  channel_id integer not null references channels(id),
+  at integer not null,
+  outcome text not null,
+  message text not null
+);
 create index if not exists commits_by_channel on commits(channel_id, id);
 -- At most one pending commit per channel: a second one would mean two writers.
 create unique index if not exists one_pending_per_channel on commits(channel_id) where status = 'pending';
@@ -207,6 +264,8 @@ function channelOf(r: Row): ChannelRecord {
     stepMs: Number(r['step_ms']),
     schedule: String(r['schedule']),
     revision: Number(r['revision']),
+    runAtMinutes: Number(r['run_at_minutes']),
+    targets: { ...DEFAULT_TARGETS, ...(r['targets'] ? (JSON.parse(String(r['targets'])) as Partial<Targets>) : {}) },
     state: JSON.parse(String(r['state'])) as PlanState,
     edge: Number(r['edge']),
   };
@@ -240,6 +299,9 @@ export class Store {
     // A database made before commits had notes gets the column.
     const cols = db.prepare('pragma table_info(commits)').all() as { name: string }[];
     if (!cols.some((c) => c.name === 'note')) db.exec('alter table commits add column note text');
+    const colsNow = db.prepare('pragma table_info(channels)').all() as { name: string }[];
+    if (!colsNow.some((c) => c.name === 'run_at_minutes')) db.exec('alter table channels add column run_at_minutes integer not null default 180');
+    if (!colsNow.some((c) => c.name === 'targets')) db.exec('alter table channels add column targets text');
     const stagedCols = db.prepare('pragma table_info(staged_slots)').all() as { name: string }[];
     if (!stagedCols.some((c) => c.name === 'edited')) db.exec('alter table staged_slots add column edited integer not null default 0');
     // A database made before revisions: its schedule becomes revision 1, saved at time 0 (unknown).
@@ -271,8 +333,8 @@ export class Store {
       let id: number;
       try {
         const r = this.db
-          .prepare('insert into channels (name, tunarr_id, floor_ms, step_ms, schedule, revision, state, edge) values (?, ?, ?, ?, ?, 1, ?, ?)')
-          .run(c.name, c.tunarrId, c.floorMs, c.stepMs, c.schedule, JSON.stringify(c.state), c.edge);
+          .prepare('insert into channels (name, tunarr_id, floor_ms, step_ms, schedule, revision, run_at_minutes, state, edge) values (?, ?, ?, ?, ?, 1, ?, ?, ?)')
+          .run(c.name, c.tunarrId, c.floorMs, c.stepMs, c.schedule, c.runAtMinutes ?? 180, JSON.stringify(c.state), c.edge);
         id = Number(r.lastInsertRowid);
       } catch (e) {
         if (String(e).includes('UNIQUE')) throw new StoreError(`a channel named "${c.name}" already exists`);
@@ -360,6 +422,68 @@ export class Store {
     });
   }
 
+  /** Changes a channel's floor, step and the time of its scheduled run. Any of them may be left out. */
+  setSettings(name: string, s: { floorMs?: number; stepMs?: number; runAtMinutes?: number }): void {
+    const ch = this.channel(name);
+    if (!ch) throw new StoreError(`no channel named "${name}"`);
+    const floorMs = s.floorMs ?? ch.floorMs;
+    const stepMs = s.stepMs ?? ch.stepMs;
+    const runAt = s.runAtMinutes ?? ch.runAtMinutes;
+    if (!(floorMs > 0) || !(stepMs > 0)) throw new StoreError('floor and step must be positive');
+    if (!Number.isInteger(runAt) || runAt < 0 || runAt >= 1440) throw new StoreError('the run time must be a minute of the day, 0 to 1439');
+    this.db.prepare('update channels set floor_ms = ?, step_ms = ?, run_at_minutes = ? where id = ?').run(floorMs, stepMs, runAt, ch.id);
+  }
+
+  /** Replaces a channel's targets. Fields left out keep their default. */
+  setTargets(name: string, targets: Partial<Targets>): Targets {
+    const ch = this.channel(name);
+    if (!ch) throw new StoreError(`no channel named "${name}"`);
+    const next: Targets = { ...DEFAULT_TARGETS, ...targets };
+    const range = next.adLoadRange;
+    if (!(next.deadAirMaxShare >= 0) || !(next.endOfSlotP90MaxMinutes > 0) || !(next.maxAlerts >= 0) || !(next.maxRepeats >= 0) || (range && !(range.min >= 0 && range.max >= range.min))) {
+      throw new StoreError('the targets are not valid numbers');
+    }
+    this.db.prepare('update channels set targets = ? where id = ?').run(JSON.stringify(next), ch.id);
+    return next;
+  }
+
+  /** The metrics kept for commits, oldest first, up to the last `limit`. */
+  commitMetrics(channelId: number, limit = 100): CommitMetricsRecord[] {
+    return this.db
+      .prepare(
+        `select c.id, c.finished_at, c.from_edge, c.to_edge, m.metrics, m.alerts, m.warnings
+           from commit_metrics m join commits c on c.id = m.commit_id
+          where c.channel_id = ? order by c.id desc limit ?`,
+      )
+      .all(channelId, limit)
+      .map((r) => {
+        const o = r as Row;
+        return {
+          commitId: Number(o['id']), at: Number(o['finished_at']), fromEdge: Number(o['from_edge']), toEdge: Number(o['to_edge']),
+          metrics: JSON.parse(String(o['metrics'])) as Metrics, alerts: Number(o['alerts']), warnings: Number(o['warnings']),
+        };
+      })
+      .reverse();
+  }
+
+  /** Records how a run of the worker ended, whoever started it. */
+  recordRun(name: string, at: number, outcome: RunOutcome, message: string): void {
+    const ch = this.channel(name);
+    if (!ch) throw new StoreError(`no channel named "${name}"`);
+    this.db.prepare('insert into channel_runs (channel_id, at, outcome, message) values (?, ?, ?, ?)').run(ch.id, at, outcome, message);
+  }
+
+  /** The last runs of a channel, newest first. */
+  lastRuns(channelId: number, limit = 10): RunRecord[] {
+    return this.db
+      .prepare('select * from channel_runs where channel_id = ? order by id desc limit ?')
+      .all(channelId, limit)
+      .map((r) => {
+        const o = r as Row;
+        return { id: Number(o['id']), channelId, at: Number(o['at']), outcome: String(o['outcome']) as RunOutcome, message: String(o['message']) };
+      });
+  }
+
   /** Attaches a note to a commit, for the person who has to look at it later. */
   noteCommit(commitId: number, note: string): void {
     const r = this.db.prepare('update commits set note = ? where id = ?').run(note, commitId);
@@ -367,7 +491,7 @@ export class Store {
   }
 
   /** The append happened: the channel's state and edge move to the commit's, in one step. */
-  completeCommit(commitId: number, actualEdge: number, at: number): void {
+  completeCommit(commitId: number, actualEdge: number, at: number, kept?: { metrics: Metrics; alerts: number; warnings: number }): void {
     this.tx(() => {
       const row = this.db.prepare('select * from commits where id = ?').get(commitId);
       if (!row) throw new StoreError(`no commit ${commitId}`);
@@ -375,6 +499,9 @@ export class Store {
       if (c.status !== 'pending') throw new StoreError(`commit ${commitId} is ${c.status}, not pending`);
       this.db.prepare("update commits set status = 'done', finished_at = ? where id = ?").run(at, commitId);
       this.db.prepare('update channels set state = ?, edge = ? where id = ?').run(JSON.stringify(c.state), actualEdge, c.channelId);
+      if (kept) {
+        this.db.prepare('insert or replace into commit_metrics (commit_id, metrics, alerts, warnings) values (?, ?, ?, ?)').run(commitId, JSON.stringify(kept.metrics), kept.alerts, kept.warnings);
+      }
       // What was staged before the new end is now in Tunarr: it is no longer staged.
       this.db.prepare('delete from staged_slots where channel_id = ? and start < ?').run(c.channelId, actualEdge);
     });

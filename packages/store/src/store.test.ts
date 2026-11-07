@@ -339,3 +339,52 @@ describe('the chapter cache', () => {
     expect(s.cachedChapters('p1', 5000, 0)).toBeUndefined();
   });
 });
+
+describe('metrics, targets, settings and runs', () => {
+  const metrics = { slots: 1, adLoadRatio: { count: 1, median: 0.3, p90: 0.3, p99: 0.3, max: 0.3 } } as unknown as import('@daytuner/engine').Metrics;
+
+  it('keeps the metrics of a completed commit, oldest first, and none for one that has none', () => {
+    const store = Store.open(':memory:');
+    const ch = store.addChannel(channel({ edge: 1000 }));
+    const a = store.beginCommit({ channelId: ch.id, fromEdge: 1000, toEdge: 2000, state: state(2), items: 1, totalMs: 1000, slots: [], at: 1 });
+    store.completeCommit(a.id, 2000, 10, { metrics, alerts: 2, warnings: 3 });
+    const b = store.beginCommit({ channelId: ch.id, fromEdge: 2000, toEdge: 3000, state: state(3), items: 1, totalMs: 1000, slots: [], at: 11 });
+    store.completeCommit(b.id, 3000, 20); // a recovery: no metrics known
+    const c = store.beginCommit({ channelId: ch.id, fromEdge: 3000, toEdge: 4000, state: state(4), items: 1, totalMs: 1000, slots: [], at: 21 });
+    store.completeCommit(c.id, 4000, 30, { metrics, alerts: 0, warnings: 0 });
+    const points = store.commitMetrics(ch.id);
+    expect(points.map((p) => [p.commitId, p.at, p.alerts, p.warnings])).toEqual([[a.id, 10, 2, 3], [c.id, 30, 0, 0]]);
+    expect(points[0]!.metrics.adLoadRatio.median).toBe(0.3);
+    expect(store.commitMetrics(ch.id, 1).map((p) => p.commitId)).toEqual([c.id]);
+  });
+
+  it('gives default targets, merges and validates changes', () => {
+    const store = Store.open(':memory:');
+    const ch = store.addChannel(channel());
+    expect(ch.targets).toEqual({ deadAirMaxShare: 0.005, adLoadRange: null, endOfSlotP90MaxMinutes: 30, maxAlerts: 0, maxRepeats: 0 });
+    expect(store.setTargets('funny', { deadAirMaxShare: 0.01, adLoadRange: { min: 0.1, max: 0.4 } })).toMatchObject({ deadAirMaxShare: 0.01, maxAlerts: 0 });
+    expect(store.channel('funny')!.targets.adLoadRange).toEqual({ min: 0.1, max: 0.4 });
+    expect(() => store.setTargets('funny', { deadAirMaxShare: -1 })).toThrow(/not valid/);
+    expect(() => store.setTargets('funny', { adLoadRange: { min: 0.5, max: 0.1 } })).toThrow(/not valid/);
+    expect(() => store.setTargets('ghost', {})).toThrow(/no channel/);
+  });
+
+  it('changes the floor, the step and the run time, with checks', () => {
+    const store = Store.open(':memory:');
+    expect(store.addChannel(channel()).runAtMinutes).toBe(180);
+    store.setSettings('funny', { floorMs: 5 * 86_400_000, runAtMinutes: 90 });
+    expect(store.channel('funny')).toMatchObject({ floorMs: 5 * 86_400_000, stepMs: 86_400_000, runAtMinutes: 90 });
+    expect(() => store.setSettings('funny', { runAtMinutes: 1440 })).toThrow(/minute of the day/);
+    expect(() => store.setSettings('funny', { floorMs: 0 })).toThrow(/positive/);
+    expect(() => store.setSettings('ghost', {})).toThrow(/no channel/);
+  });
+
+  it('records runs and lists the latest first', () => {
+    const store = Store.open(':memory:');
+    const ch = store.addChannel(channel());
+    store.recordRun('funny', 1, 'appended', 'a');
+    store.recordRun('funny', 2, 'refused', 'b');
+    expect(store.lastRuns(ch.id).map((r) => [r.at, r.outcome, r.message])).toEqual([[2, 'refused', 'b'], [1, 'appended', 'a']]);
+    expect(store.lastRuns(ch.id, 1)).toHaveLength(1);
+  });
+});

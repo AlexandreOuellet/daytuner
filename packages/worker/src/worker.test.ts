@@ -3,6 +3,8 @@ import { emptyPlanState } from '@daytuner/engine';
 import { Store } from '@daytuner/store';
 import { FakeTunarr, TunarrClient } from '@daytuner/tunarr-client';
 import { CHAPTER_CACHE_LIFETIME_MS } from './chapters.js';
+import { evaluateHealth } from './health.js';
+import { isDue, runAndRecord, scheduledInstant } from './scheduler.js';
 import { stageReset, adjustCursor, adoptHistory, revisionImpact, stageCheck, stageDiff, stageEdit, stageGenerate, stageRefresh, ConsistencyError, listSequences, resync, topUp, type WorkerDeps } from './worker.js';
 
 const DAY = 86_400_000;
@@ -701,5 +703,80 @@ describe('resetting staged slots to the plan', () => {
     await stageReset(s.deps, 'Test', { from: other.start, to: other.end });
     expect(s.store.stagedSlots(id).find((x) => x.start === other.start)).toMatchObject({ locked: true });
     await expect(stageReset(s.deps, 'Test', { from: 10, to: 5 })).rejects.toThrow(/after its start/);
+  });
+});
+
+
+describe('metrics kept for each commit', () => {
+  it('stores the metrics and the alert count of what a commit wrote', async () => {
+    const s = setup();
+    await topUp(s.deps, 'Test');
+    const id = s.store.channel('Test')!.id;
+    const [point] = s.store.commitMetrics(id);
+    expect(point).toMatchObject({ alerts: expect.any(Number), warnings: expect.any(Number) });
+    expect(point!.metrics.slots).toBeGreaterThan(0);
+    expect(point!.metrics.gridAccuracy.share).toBeGreaterThan(0.99);
+  });
+});
+
+describe('health', () => {
+  it('is ok with a committed lineup and metrics inside the targets, and says what is wrong otherwise', async () => {
+    const s = setup(9 * DAY);
+    await topUp(s.deps, 'Test').catch(() => undefined); // already far enough ahead: nothing to commit
+    const ch = () => s.store.channel('Test')!;
+    const fine = evaluateHealth({ channel: ch(), last: undefined, lastRun: undefined, clock: s.clock });
+    expect(fine.status).toBe('ok');
+    expect(fine.checks.map((c) => c.name)).toEqual(['Committed ahead']);
+
+    const short = setup(2 * DAY);
+    expect(evaluateHealth({ channel: short.store.channel('Test')!, last: undefined, lastRun: undefined, clock: short.clock })).toMatchObject({ status: 'needs-attention' });
+
+    await topUp(short.deps, 'Test');
+    const id = short.store.channel('Test')!.id;
+    const last = short.store.commitMetrics(id)[0]!;
+    const run = { id: 1, channelId: id, at: 1, outcome: 'refused' as const, message: 'the lineup ran out' };
+    const h = evaluateHealth({ channel: short.store.channel('Test')!, last, lastRun: run, clock: short.clock });
+    expect(h.headline.adLoad).toBeGreaterThan(0);
+    expect(h.checks.find((c) => c.name === 'Last run')).toMatchObject({ ok: false, detail: expect.stringContaining('the lineup ran out') });
+    expect(h.status).toBe('needs-attention');
+    // Tighten a target until it trips.
+    short.store.setTargets('Test', { deadAirMaxShare: 0 });
+    const tight = evaluateHealth({ channel: short.store.channel('Test')!, last, lastRun: undefined, clock: short.clock });
+    expect(tight.checks.find((c) => c.name === 'Dead air')!.ok).toBe(last.metrics.deadAirShare === 0);
+  });
+});
+
+describe('the daily run', () => {
+  it('is due once its time has passed in the schedule\'s own zone, and not again until the next day', () => {
+    const zone = 'America/Toronto';
+    const at3 = 3 * 60;
+    const noon = Date.UTC(2026, 10, 6, 17, 0); // 12:00 in Toronto (UTC-5)
+    const instant = scheduledInstant(zone, at3, noon);
+    expect(instant).toBe(Date.UTC(2026, 10, 6, 8, 0)); // 03:00 Toronto today
+    const earlier = Date.UTC(2026, 10, 6, 6, 0); // 01:00 Toronto: today's run has not come yet
+    expect(scheduledInstant(zone, at3, earlier)).toBe(Date.UTC(2026, 10, 5, 8, 0)); // yesterday's
+    const s = setup();
+    const ch = s.store.channel('Test')!;
+    expect(isDue({ ...ch, runAtMinutes: at3 }, undefined, noon)).toBe(true);
+    expect(isDue({ ...ch, runAtMinutes: at3 }, instant + 1, noon)).toBe(false);
+    expect(isDue({ ...ch, runAtMinutes: at3 }, instant + 1, noon + DAY)).toBe(true);
+  });
+
+  it('copes with the daylight-saving change (03:00 on the spring day is after the gap)', () => {
+    const zone = 'America/Toronto';
+    const spring = Date.UTC(2026, 2, 8, 16, 0); // 8 March 2026, 12:00 EDT
+    expect(scheduledInstant(zone, 2 * 60 + 30, spring)).toBe(Date.UTC(2026, 2, 8, 7, 30)); // 02:30 does not exist: it is 03:30 EDT
+  });
+
+  it('records how a run ended: appended, nothing to do, refused', async () => {
+    const s = setup(2 * DAY);
+    const id = s.store.channel('Test')!.id;
+    await runAndRecord(s.deps, 'Test');
+    expect(s.store.lastRuns(id, 1)[0]).toMatchObject({ outcome: 'appended', at: NOW0 });
+    await runAndRecord(s.deps, 'Test');
+    expect(s.store.lastRuns(id, 1)[0]).toMatchObject({ outcome: 'nothing-to-do' });
+    s.fake.appendExternally([{ type: 'flex', duration: 5 * MIN }]);
+    await expect(runAndRecord(s.deps, 'Test')).rejects.toThrow();
+    expect(s.store.lastRuns(id, 1)[0]).toMatchObject({ outcome: 'refused' });
   });
 });

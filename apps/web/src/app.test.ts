@@ -17,13 +17,14 @@ const slot = (start: number, end: number): PlannedSlot => ({
 describe('the API', () => {
   let store: Store;
   let get: (path: string) => Promise<{ status: number; body: any }>;
+  let app: ReturnType<typeof createApp>;
 
   beforeEach(() => {
     store = Store.open(':memory:');
     store.addChannel({
       name: 'funny', tunarrId: 'tun-1', floorMs: 7 * DAY, stepMs: DAY, schedule: EXAMPLE, state: emptyPlanState(1), edge: NOW + 8 * DAY, at: 5,
     });
-    const app = createApp({ store, clock: { now: () => NOW }, client: new TunarrClient('http://tunarr.test', () => { throw new Error('no Tunarr in this test'); }) });
+    app = createApp({ store, clock: { now: () => NOW }, client: new TunarrClient('http://tunarr.test', () => { throw new Error('no Tunarr in this test'); }) });
     get = async (path) => {
       const r = await app.request(path);
       return { status: r.status, body: await r.json() };
@@ -83,6 +84,36 @@ describe('the API', () => {
     expect(all.map((s: any) => [s.locked, Object.keys(s.pins).length, s.programs, s.items])).toEqual([[true, 0, ['m1'], undefined], [false, 1, ['m1'], undefined]]);
     expect((await get(`/api/channels/funny/staged?from=${edge + 2 * DAY}`)).body).toHaveLength(1);
     expect((await get('/api/channels/funny/staged?items=1')).body[0].items).toHaveLength(1);
+  });
+
+  it('gives a card per channel with its health, and the metrics of each commit', async () => {
+    const ch = store.channel('funny')!;
+    const metrics = { slots: 3, adLoadRatio: { count: 3, median: 0.3, p90: 0.4, p99: 0.4, max: 0.4 }, deadAirShare: 0.001, endOfSlotMinutes: { count: 3, median: 5, p90: 9, p99: 9, max: 9 }, repeatedProgramAirings: 0 };
+    const c = store.beginCommit({ channelId: ch.id, fromEdge: ch.edge, toEdge: ch.edge + 1000, state: emptyPlanState(1), items: 1, totalMs: 1000, slots: [], at: 1 });
+    store.completeCommit(c.id, ch.edge + 1000, 2, { metrics: metrics as never, alerts: 0, warnings: 1 });
+    const cards = (await get('/api/dashboard')).body;
+    expect(cards[0]).toMatchObject({ name: 'funny', health: { status: 'ok', headline: { adLoad: 0.3, deadAirShare: 0.001 } } });
+    expect(cards[0].health.checks.map((x: any) => x.name)).toContain('Dead air');
+    expect((await get('/api/channels/funny/metrics')).body.map((p: any) => [p.commitId, p.alerts, p.warnings])).toEqual([[c.id, 0, 1]]);
+    store.setTargets('funny', { deadAirMaxShare: 0.0001 });
+    expect((await get('/api/channels/funny/health')).body).toMatchObject({ status: 'needs-attention' });
+    expect((await get('/api/channels/funny/health')).body.checks.find((x: any) => x.name === 'Dead air')).toMatchObject({ ok: false });
+  });
+
+  it('shows and changes targets and settings, and lists the runs', async () => {
+    const post = async (path: string, body: unknown) => {
+      const r = await app.request(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+      return { status: r.status, body: await r.json() as any };
+    };
+    expect((await get('/api/channels/funny/targets')).body).toMatchObject({ deadAirMaxShare: 0.005, adLoadRange: null });
+    expect((await post('/api/channels/funny/targets', { endOfSlotP90MaxMinutes: 20 })).body).toMatchObject({ endOfSlotP90MaxMinutes: 20, deadAirMaxShare: 0.005 });
+    expect((await post('/api/channels/funny/targets', { deadAirMaxShare: -1 })).status).toBe(400);
+    const set = await post('/api/channels/funny/settings', { runAt: '04:30', floorMs: 5 * DAY });
+    expect(set.body).toMatchObject({ runAtMinutes: 270, floorMs: 5 * DAY });
+    expect((await post('/api/channels/funny/settings', { runAt: 'noon' })).status).toBe(400);
+    expect((await post('/api/channels/funny/settings', { runAt: '25:00' })).status).toBe(400);
+    store.recordRun('funny', 5, 'appended', 'appended 9 slots');
+    expect((await get('/api/channels/funny/runs')).body[0]).toMatchObject({ outcome: 'appended', message: 'appended 9 slots' });
   });
 
   it('lists commits, newest first', async () => {

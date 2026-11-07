@@ -26,12 +26,13 @@ metrics are stored over time, which the engine computes today but nothing keeps.
 - **Targets the owner sets, with sensible defaults.** Per channel, a few thresholds start from defaults and can be
   changed. The cards mark ok or needs attention against them, and the commit log says which target tripped.
 
-## Storage
+## Storage (built)
 
-- A `commit_metrics` table: one row per commit, with the commit id and the computed metrics as JSON (the same
-  `Metrics` the engine returns). It is written in the same step that completes the commit, from the slots that were
+- A `commit_metrics` table: one row per commit, with the commit id, the computed metrics as JSON (the same
+  `Metrics` the engine returns) and the number of alerts and warnings. It is written in the same step that completes the commit, from the slots that were
   appended. The channel's grid and time zone, which the metrics need, come from the schedule in force at that commit.
-- A per-channel `targets` row (JSON), created with the defaults when the channel is added.
+- A per-channel `targets` column (JSON), with the defaults until changed, and a `channel_runs` table that records how each
+  run of the worker ended (appended, nothing to do, refused, failed), which the health card's "last run" reads.
 - Commits made before this exists have no stored metrics (the log keeps only each slot's programs, not its items), so
   their points are missing and the trend starts at the first commit made after the change.
 

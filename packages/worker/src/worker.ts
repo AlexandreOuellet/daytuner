@@ -3,7 +3,7 @@
 // agree about where the lineup ends, and it records every commit so that a crash can be resolved.
 // Rules: docs/architecture.md, "Worker".
 
-import { adjustSequence, diffSlots, emptyPlanState, plan, type SlotChange, type Clock, type StagedWindow, type CursorAdjustment, type LockConflict, type PlannedSlot, type PlanWarning, type Schedule } from '@daytuner/engine';
+import { adjustSequence, computeMetrics, diffSlots, emptyPlanState, plan, type SlotChange, type Clock, type StagedWindow, type CursorAdjustment, type LockConflict, type PlannedSlot, type PlanWarning, type Schedule } from '@daytuner/engine';
 import { parseScheduleFile, resolveSchedule } from '@daytuner/schedule';
 import { cachedSource } from './chapters.js';
 import type { ChannelRecord, CommitRecord, PinRecord, StagedSlotRecord, Store } from '@daytuner/store';
@@ -173,7 +173,11 @@ export async function topUp(deps: WorkerDeps, channelName: string, opts: TopUpOp
     store.noteCommit(commit.id, `verification failed: ${what}`);
     throw new ConsistencyError(`Tunarr stored something different from what was sent (${what}). The commit stays pending; see \`channel commits ${channelName}\` and \`channel resync ${channelName}\`.`);
   }
-  store.completeCommit(commit.id, report.edgeAfter, clock.now());
+  store.completeCommit(commit.id, report.edgeAfter, clock.now(), {
+    metrics: computeMetrics(result.slots, { grid: schedule.grid, zone: schedule.zone }),
+    alerts: result.warnings.filter((w) => w.severity === 'alert').length,
+    warnings: result.warnings.filter((w) => w.severity === 'warning').length,
+  });
   if (result.conflicts.length > 0) {
     store.noteCommit(commit.id, `locked slots that could not be kept: ${result.conflicts.map((c) => `${c.slotId} at ${c.start} (${c.reason}: ${c.message})`).join('; ')}`);
   }

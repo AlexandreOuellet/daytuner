@@ -9,7 +9,7 @@ import type { ChannelRecord, PinRecord, Store } from '@daytuner/store';
 import type { TunarrClient } from '@daytuner/tunarr-client';
 import {
   adjustCursor, adoptHistory, addChannel, cachedSource, listSequences, resync, revisionImpact, stageCheck, stageDiff, stageEdit, stageGenerate,
-  stageRefresh, stageReset, topUp, type StageEdit, type StageResult,
+  runAndRecord, stageRefresh, stageReset, topUp, type StageEdit, type StageResult,
 } from '@daytuner/worker';
 import { Jobs } from './jobs.js';
 
@@ -245,7 +245,8 @@ export function registerActions(app: Hono, d: ActionDeps): void {
     const dryRun = b['dryRun'] !== false; // writing must be asked for
     if (!dryRun && !d.writeClient) throw new Forbidden('writing to Tunarr is switched off on this server (start it with DAYTUNER_ALLOW_WRITES=1)');
     return job(c, ch.name, dryRun ? 'plan (dry run)' : 'commit', async () => {
-      const r = await topUp({ store: d.store, client: dryRun ? d.client : d.writeClient!, clock: d.clock }, ch.name, { dryRun });
+      const wdeps = { store: d.store, client: dryRun ? d.client : d.writeClient!, clock: d.clock };
+      const r = dryRun ? await topUp(wdeps, ch.name, { dryRun: true }) : await runAndRecord(wdeps, ch.name);
       return { action: r.action, recovered: r.recovered ?? null, aheadBefore: r.aheadBefore, items: r.items ?? 0, totalMs: r.totalMs ?? 0, slots: r.slots ?? 0, commitId: r.commitId ?? null, edgeAfter: r.edgeAfter ?? null, conflicts: r.conflicts, warnings: r.warnings };
     });
   });
