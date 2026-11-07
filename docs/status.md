@@ -49,7 +49,7 @@ Nothing is pushed publicly until all of this is done (see the roadmap).
 
 **Release**
 - [ ] A verified end-to-end run on a test copy of Tunarr, including playback and the guide check (staging commit verified; ad playback and the media server's guide still open)
-- [ ] A way to run it: a container image whose own scheduler runs the worker daily (decided)
+- [x] A way to run it: a container image whose own scheduler runs the worker daily (`Dockerfile`, `docs/deploy.md`). Built with buildkit in the test cluster and deployed there (`daytuner-test` in `tunarr-test`, behind basic auth, reading the test Tunarr copy, read only)
 
 ## Open decisions (the owner decides)
 

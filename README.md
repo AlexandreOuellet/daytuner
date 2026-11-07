@@ -8,8 +8,9 @@ each channel's lineup. **This project owns everything about deciding what plays 
 the schedule definition, the planning (grid, ads, bumpers), the preview with metrics, the commit,
 and the memory of "which episode plays next".
 
-> **Status: skeleton.** The documentation describes the goal and the rules learned so far.
-> Nothing runs yet. See [`docs/roadmap.md`](docs/roadmap.md).
+> **Status: working, not yet released.** The planner, the command line, the store, the worker, the web interface and a container
+> image are built and tested against a copy of Tunarr. It is not published or tagged: see [`docs/status.md`](docs/status.md) for what is
+> done and what is left, and [`docs/deploy.md`](docs/deploy.md) to run it. Rules and design: [`docs/roadmap.md`](docs/roadmap.md).
 
 ## Why
 

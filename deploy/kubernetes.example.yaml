@@ -1,0 +1,42 @@
+# An example for Kubernetes: one DayTuner, a volume for its database, and a service. Change the image, TUNARR_URL and the
+# storage class. DayTuner has NO login: put it behind your own authentication (an ingress with forward auth or basic auth)
+# before anyone but you can reach it. By default it cannot write to Tunarr; set DAYTUNER_ALLOW_WRITES to "1" to let it
+# commit lineups and run its daily scheduler.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: daytuner-config }
+spec:
+  accessModes: [ReadWriteOnce]
+  resources: { requests: { storage: 1Gi } }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: daytuner, labels: { app: daytuner } }
+spec:
+  replicas: 1                       # one only: the database is a single file and one process owns it
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: daytuner } }
+  template:
+    metadata: { labels: { app: daytuner } }
+    spec:
+      securityContext: { fsGroup: 1000 }
+      containers:
+        - name: daytuner
+          image: your-registry/daytuner:latest
+          env:
+            - { name: TUNARR_URL, value: "http://tunarr:8000" }
+            # - { name: DAYTUNER_ALLOW_WRITES, value: "1" }
+          ports: [{ name: http, containerPort: 8420 }]
+          readinessProbe: { httpGet: { path: /api/health, port: http }, periodSeconds: 10 }
+          resources: { requests: { cpu: 100m, memory: 256Mi }, limits: { memory: 1Gi } }
+          volumeMounts: [{ name: config, mountPath: /config }]
+      volumes:
+        - name: config
+          persistentVolumeClaim: { claimName: daytuner-config }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: daytuner }
+spec:
+  selector: { app: daytuner }
+  ports: [{ name: http, port: 8420, targetPort: http }]

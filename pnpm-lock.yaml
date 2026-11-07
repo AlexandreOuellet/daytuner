@@ -25,13 +25,13 @@ importers:
       '@daytuner/worker':
         specifier: workspace:^
         version: link:../../packages/worker
+      tsx:
+        specifier: ^4.23.15
+        version: 4.23.15
     devDependencies:
       '@types/node':
         specifier: ^26.6.6
         version: 26.6.6
-      tsx:
-        specifier: ^4.23.15
-        version: 4.23.15
       typescript:
         specifier: ^7.0.2
         version: 7.0.2
@@ -99,13 +99,13 @@ importers:
       hono:
         specifier: ^4.13.16
         version: 4.13.16
+      tsx:
+        specifier: ^4.23.15
+        version: 4.23.15
     devDependencies:
       '@types/node':
         specifier: ^26.6.6
         version: 26.6.6
-      tsx:
-        specifier: ^4.23.15
-        version: 4.23.15
       typescript:
         specifier: ^7.0.2
         version: 7.0.2
