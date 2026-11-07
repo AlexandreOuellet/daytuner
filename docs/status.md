@@ -57,7 +57,7 @@ Settled this session and recorded under Decided in the roadmap: the exception fa
 
 - **Ad and bumper interface.** The model is decided. Open: how the web interface shows the positions plainly (phase 5).
 - **Mid-break offers** need refinement, deferred by the owner until later.
-- **Phase 4 design.** Storage, conflicts, revisions and the revision-versus-locks rule are decided (see
+- **Phase 4 design.** The staging build plan is in [`staging-design.md`](staging-design.md) (six slices; pins by block number, a lock applies its state effect, ranges in local dates). Storage, conflicts, revisions and the revision-versus-locks rule are decided (see
   `architecture.md`, "Phase 4 storage"). Still to settle when building: how staging is shown in the CLI, and the
   exact preview diff format.
 
