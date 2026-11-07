@@ -242,6 +242,76 @@ export function listSequences(schedule: Schedule): SequenceInfo[] {
   return [...out.values()].sort((a, b) => a.key.localeCompare(b.key));
 }
 
+export interface FoundPlace {
+  key: string;
+  pool: string;
+  length: number;
+  /** The last item of this pool in the lineup, or undefined when the lineup holds none of it. */
+  lastProgramId: string | undefined;
+  /** What the sequence's state should be: the episode after the last one found, and how many distinct episodes have aired. */
+  place: { position: number; history: number };
+}
+
+/**
+ * Where each ordered show stands, read from a channel's existing lineup: the latest item in the
+ * lineup that belongs to the pool is the last one scheduled, so "next" is the episode after it.
+ * `history` is the number of distinct episodes of the pool the lineup holds. A rerun slot linked to
+ * the same show counts like any other item, so a trailing rerun can pull the place back; the caller
+ * shows the result and a person corrects it with `cursor set`.
+ */
+export function placesFromLineup(schedule: Schedule, lineup: readonly Record<string, unknown>[]): FoundPlace[] {
+  const out: FoundPlace[] = [];
+  for (const info of listSequences(schedule)) {
+    const programs = schedule.pools[info.pool]!.programs;
+    const index = new Map(programs.map((id, i) => [id, i]));
+    let last: number | undefined;
+    let lastId: string | undefined;
+    const seen = new Set<string>();
+    for (const item of lineup) {
+      if (item['type'] !== 'content' || typeof item['id'] !== 'string') continue;
+      const i = index.get(item['id']);
+      if (i === undefined) continue;
+      last = i;
+      lastId = item['id'];
+      seen.add(item['id']);
+    }
+    out.push({
+      key: info.key,
+      pool: info.pool,
+      length: info.length,
+      lastProgramId: lastId,
+      place: last === undefined ? { position: 0, history: 0 } : { position: (last + 1) % info.length, history: seen.size },
+    });
+  }
+  return out;
+}
+
+/**
+ * Sets each ordered show's place from the channel's existing lineup (see `placesFromLineup`). Only for a
+ * channel DayTuner has not yet written to: once it has commits its own state is the truth. A dry run
+ * changes nothing.
+ */
+export async function adoptHistory(
+  deps: WorkerDeps,
+  channelName: string,
+  opts: { dryRun?: boolean } = {},
+): Promise<{ found: FoundPlace[]; titles: Record<string, string> }> {
+  const { store, client } = deps;
+  const ch = store.channel(channelName);
+  if (!ch) throw new ConsistencyError(`no channel named "${channelName}" in the store`);
+  if (store.commits(ch.id, 1).length > 0) {
+    throw new ConsistencyError(`DayTuner has already written to "${channelName}", so its own state is the truth; use \`cursor\` to move a show's place`);
+  }
+  const { schedule, titles } = await resolveSchedule(parseScheduleFile(ch.schedule), client);
+  const found = placesFromLineup(schedule, await client.lineup(ch.tunarrId));
+  if (!opts.dryRun) {
+    const sequences = { ...ch.state.sequences };
+    for (const f of found) if (f.lastProgramId !== undefined) sequences[f.key] = f.place;
+    store.setState(channelName, { ...ch.state, sequences });
+  }
+  return { found, titles };
+}
+
 /**
  * Moves an ordered show's place by hand (a missed week): rewind by k episodes, or set to an episode.
  * It changes the state at the committed edge, so it affects the first uncommitted airing onward and

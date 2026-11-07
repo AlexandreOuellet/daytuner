@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { emptyPlanState } from '@daytuner/engine';
 import { Store } from '@daytuner/store';
 import { FakeTunarr, TunarrClient } from '@daytuner/tunarr-client';
-import { adjustCursor, ConsistencyError, listSequences, resync, topUp, type WorkerDeps } from './worker.js';
+import { adjustCursor, adoptHistory, ConsistencyError, listSequences, resync, topUp, type WorkerDeps } from './worker.js';
 
 const DAY = 86_400_000;
 const MIN = 60_000;
@@ -263,6 +263,52 @@ describe('a verified append that does not match', () => {
     await resync(s.deps, 'Test');
     expect(s.store.pendingCommit(ch.id)).toBeUndefined();
     expect((await topUp(s.deps, 'Test')).action).toBe('none');
+  });
+});
+
+describe('adopting the places of shows from an existing lineup', () => {
+  const withHistory = (s: ReturnType<typeof setup>) => {
+    const piece = 22 * MIN + 1000;
+    const flex = s.fake.lineup[0]!['duration'] as number;
+    s.fake.lineup = [
+      { type: 'flex', duration: flex - 3 * piece },
+      { type: 'content', id: 'ep3', startOffsetMs: 0, duration: piece },
+      { type: 'content', id: 'mov1', startOffsetMs: 0, duration: 0 },
+      { type: 'content', id: 'ep5', startOffsetMs: 0, duration: piece },
+      { type: 'content', id: 'ep5', startOffsetMs: 0, duration: piece },
+    ];
+  };
+
+  it('shows the place found, and applies it only when asked', async () => {
+    const s = setup();
+    withHistory(s);
+    const dry = await adoptHistory(s.deps, 'Test', { dryRun: true });
+    const a = dry.found.find((f) => f.key === 'seq:a')!;
+    expect(a.lastProgramId).toBe('ep5');
+    expect(a.place).toEqual({ position: 5, history: 2 });
+    expect(s.store.channel('Test')!.state.sequences['seq:a']).toBeUndefined();
+    await adoptHistory(s.deps, 'Test');
+    expect(s.store.channel('Test')!.state.sequences['seq:a']).toEqual({ position: 5, history: 2 });
+  });
+
+  it('leaves a show that is not in the lineup at episode 1', async () => {
+    const s = setup();
+    const r = await adoptHistory(s.deps, 'Test');
+    expect(r.found.every((f) => f.lastProgramId === undefined)).toBe(true);
+    expect(s.store.channel('Test')!.state.sequences['seq:a']).toBeUndefined();
+  });
+
+  it('wraps to the first episode after the last one', async () => {
+    const s = setup();
+    s.fake.lineup = [...s.fake.lineup, { type: 'content', id: 'ep400', startOffsetMs: 0, duration: 0 }];
+    const r = await adoptHistory(s.deps, 'Test', { dryRun: true });
+    expect(r.found.find((f) => f.key === 'seq:a')!.place.position).toBe(0);
+  });
+
+  it('refuses once DayTuner has written to the channel', async () => {
+    const s = setup();
+    await topUp(s.deps, 'Test');
+    await expect(adoptHistory(s.deps, 'Test')).rejects.toThrow(/already written/);
   });
 });
 

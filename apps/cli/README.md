@@ -4,7 +4,7 @@
 daytuner preview <channel.yaml> [--from ISO] [--days N] [--seed N]
 daytuner channel add <channel.yaml> [--channel NAME] [--seed N] [--floor 7d] [--step 24h]
 daytuner channel set-schedule <name> <channel.yaml>
-daytuner channel list | status <name> | commits <name>
+daytuner channel list | status <name> | commits <name> | adopt-history <name> [--yes]
 daytuner run <name> [--yes]
 daytuner cursor <name> list | rewind <sequence> <k> | set <sequence> <episode-number>
 ```

@@ -19,7 +19,7 @@ import { alignToGrid, TunarrClient, type FetchLike } from '@daytuner/tunarr-clie
 import { ceilToGrid, computeMetrics, DAY, emptyPlanState, plan, type Clock } from '@daytuner/engine';
 import { parseDuration, parseScheduleFile, resolveSchedule } from '@daytuner/schedule';
 import { Store } from '@daytuner/store';
-import { adjustCursor, ConsistencyError, listSequences, resync, topUp } from '@daytuner/worker';
+import { adjustCursor, adoptHistory, ConsistencyError, listSequences, placesFromLineup, resync, topUp } from '@daytuner/worker';
 import { formatMetrics, formatWarnings, inZone } from './format.js';
 
 export interface CliEnv {
@@ -35,7 +35,7 @@ const USAGE = `Usage:
   daytuner preview <channel.yaml> [--from ISO] [--days N] [--seed N]
   daytuner channel add <channel.yaml> [--channel NAME] [--seed N] [--floor 7d] [--step 24h]
   daytuner channel set-schedule <name> <channel.yaml>
-  daytuner channel list | status <name> | commits <name> | resync <name> [--yes]
+  daytuner channel list | status <name> | commits <name> | adopt-history <name> [--yes] | resync <name> [--yes]
   daytuner run <name> [--yes]            (a dry run without --yes)
   daytuner cursor <name> list | rewind <sequence> <k> | set <sequence> <episode-number>
 Common: --tunarr URL (or TUNARR_URL)  --db FILE (or DAYTUNER_DB, default state/daytuner.db)`;
@@ -93,13 +93,24 @@ export async function runCli(argv: string[], io: CliEnv): Promise<number> {
         const channels = await client.channels();
         const ch = channels.find((c) => c.id === wanted || String(c.number) === wanted || slug(c.name) === slug(wanted));
         if (!ch) throw new Error(`no Tunarr channel matches "${wanted}" (channels: ${channels.map((c) => c.name).join(', ')})`);
-        await resolveSchedule(parsed, client); // fail now, not at the first run, if the file does not fit the library
+        const resolved = await resolveSchedule(parsed, client); // fail now, not at the first run, if the file does not fit the library
+        const found = placesFromLineup(resolved.schedule, await client.lineup(ch.id));
         const store = openStore();
         const added = store.addChannel({
           name: parsed.channel, tunarrId: ch.id, floorMs: parseDuration(values.floor), stepMs: parseDuration(values.step),
           schedule: text, state: emptyPlanState(Number(values.seed)), edge: ch.startTime + ch.duration,
         });
         io.out(`Added channel "${added.name}" (Tunarr channel "${ch.name}"). Its lineup ends ${inZone(added.edge, parsed.timezone)}; floor ${dayLabel(added.floorMs)}, step ${dayLabel(added.stepMs)}.`);
+        for (const n of resolved.notes) io.out(`note: ${n}`);
+        for (const f of found) {
+          const where = f.lastProgramId === undefined
+            ? `nothing of it in the lineup; it starts at episode 1`
+            : `the lineup's last one is ${resolved.titles[f.lastProgramId] ?? f.lastProgramId}, so next is episode ${f.place.position + 1} of ${f.length} (${f.place.history} episodes seen)`;
+          io.out(`  ${f.key}: ${where}`);
+        }
+        if (found.some((f) => f.lastProgramId !== undefined)) {
+          io.out(`These places are not applied; every show starts at episode 1. \`channel adopt-history ${added.name} --yes\` applies them, or fix single ones with \`cursor set\`.`);
+        }
         store.close();
         return 0;
       }
@@ -116,6 +127,17 @@ export async function runCli(argv: string[], io: CliEnv): Promise<number> {
         const store = openStore();
         const all = store.channels();
         io.out(all.length === 0 ? 'No channels.' : all.map((c) => `${c.name}  (Tunarr ${c.tunarrId})  floor ${dayLabel(c.floorMs)}  step ${dayLabel(c.stepMs)}`).join('\n'));
+        store.close();
+        return 0;
+      }
+      if (sub === 'adopt-history' && a) {
+        const store = openStore();
+        const client = reader();
+        const r = await adoptHistory({ store, client, clock: io.clock }, a, { dryRun: !values.yes });
+        for (const f of r.found) {
+          io.out(`${f.key}: ${f.lastProgramId === undefined ? 'nothing of it in the lineup, stays at episode 1' : `the lineup's last one is ${r.titles[f.lastProgramId] ?? f.lastProgramId}, next is episode ${f.place.position + 1} of ${f.length} (${f.place.history} episodes seen)`}`);
+        }
+        io.out(values.yes ? 'Applied.' : 'This was a dry run. Add --yes to apply it.');
         store.close();
         return 0;
       }

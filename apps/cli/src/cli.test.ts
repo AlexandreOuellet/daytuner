@@ -153,6 +153,25 @@ describe('the command line', () => {
     expect(said()).toMatch(/commit 1 done/);
   });
 
+  it('shows the places found in an existing lineup when adding, and applies them with --yes', async () => {
+    fake.lineup = [...fake.lineup, { type: 'content', id: 'ep7', startOffsetMs: 0, duration: 0 }];
+    await run('channel', 'add', join(dir, 'test.yaml'));
+    expect(said()).toMatch(/seq:a: the lineup's last one is .*, so next is episode 8 of/);
+    expect(said()).toContain('adopt-history Test --yes');
+    out.length = 0;
+    expect(await run('channel', 'adopt-history', 'Test')).toBe(0);
+    expect(said()).toContain('dry run');
+    out.length = 0;
+    await run('cursor', 'Test', 'list');
+    expect(said()).toContain('next episode 1 of');
+    out.length = 0;
+    expect(await run('channel', 'adopt-history', 'Test', '--yes')).toBe(0);
+    expect(said()).toContain('Applied.');
+    out.length = 0;
+    await run('cursor', 'Test', 'list');
+    expect(said()).toContain('next episode 8 of');
+  });
+
   it('previews without a store', async () => {
     expect(await run('preview', join(dir, 'test.yaml'), '--days', '2', '--from', '2026-11-09T00:00:00Z')).toBe(0);
     expect(said()).toContain('grid accuracy');
