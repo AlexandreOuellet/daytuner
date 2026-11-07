@@ -170,7 +170,8 @@ It only appends. It never touches the past, the present or anything already comm
 schedule, `apply` commits it. It also imports and exports schedules as YAML.
 
 **Web interface** (`apps/web`) edits schedules, shows the preview and its metrics, shows what is
-scheduled, and links to the matching channel in Tunarr. Later phase, but part of 1.0.
+scheduled, and links to the matching channel in Tunarr. Later phase, but part of 1.0. How it is built and run is in
+[`web-architecture.md`](web-architecture.md), and its first page in [`web-ads.md`](web-ads.md).
 
 ## Data flow
 
