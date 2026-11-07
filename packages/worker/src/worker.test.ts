@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { emptyPlanState } from '@daytuner/engine';
 import { Store } from '@daytuner/store';
 import { FakeTunarr, TunarrClient } from '@daytuner/tunarr-client';
-import { adjustCursor, adoptHistory, stageCheck, stageGenerate, ConsistencyError, listSequences, resync, topUp, type WorkerDeps } from './worker.js';
+import { adjustCursor, adoptHistory, stageCheck, stageEdit, stageGenerate, ConsistencyError, listSequences, resync, topUp, type WorkerDeps } from './worker.js';
 
 const DAY = 86_400_000;
 const MIN = 60_000;
@@ -449,6 +449,106 @@ describe('checking staged slots before a commit', () => {
 
   it('has nothing to report when nothing is staged', async () => {
     expect(await stageCheck(setup().deps, 'Test')).toEqual({ conflicts: [], pinProblems: [], titles: {} });
+  });
+});
+
+describe('reshaping staged slots', () => {
+  async function staged() {
+    const s = setup();
+    const id = s.store.channel('Test')!.id;
+    const edge = s.store.channel('Test')!.edge;
+    await stageGenerate(s.deps, 'Test', { to: edge + 4 * DAY });
+    const rows = () => s.store.stagedSlots(id);
+    // Whole slots only: the first one may be partial.
+    const full = rows().filter((r) => r.start > edge + 30 * MIN);
+    return { ...s, id, rows, full };
+  }
+  const contiguous = (rows: { start: number; end: number }[]) => rows.every((r, i) => i === 0 || r.start === rows[i - 1]!.end);
+
+  it('delete: the slot before grows to take its time, and nothing is left empty', async () => {
+    const s = await staged();
+    const [a, b, c] = [s.full[0]!, s.full[1]!, s.full[2]!];
+    expect(a.end).toBe(b.start);
+    await stageEdit(s.deps, 'Test', { kind: 'delete', start: b.start });
+    const rows = s.rows();
+    expect(rows.find((r) => r.start === b.start)).toBeUndefined();
+    expect(rows.find((r) => r.start === a.start)).toMatchObject({ end: b.end, edited: true });
+    expect(rows.find((r) => r.start === c.start)).toBeDefined();
+    expect(contiguous(rows)).toBe(true);
+    for (const r of rows) expect(r.planned.items.reduce((x, i) => x + i.duration, 0)).toBe(r.end - r.start);
+  });
+
+  it('resize: extending covers or cuts the slots after it', async () => {
+    const s = await staged();
+    const [a, b, c] = [s.full[0]!, s.full[1]!, s.full[2]!];
+    const newEnd = b.start + Math.floor((b.end - b.start) / 2 / (15 * MIN)) * 15 * MIN; // inside the next slot
+    await stageEdit(s.deps, 'Test', { kind: 'resize', start: a.start, end: newEnd });
+    const rows = s.rows();
+    expect(rows.find((r) => r.start === a.start)).toMatchObject({ end: newEnd });
+    expect(rows.find((r) => r.start === b.start)).toBeUndefined();
+    expect(rows.find((r) => r.start === newEnd)).toMatchObject({ end: b.end, edited: true });
+    expect(rows.find((r) => r.start === c.start)).toBeDefined();
+    expect(contiguous(rows)).toBe(true);
+    // Covering the next slot completely removes it.
+    await stageEdit(s.deps, 'Test', { kind: 'resize', start: a.start, end: c.start });
+    expect(s.rows().find((r) => r.start === newEnd)).toBeUndefined();
+    expect(contiguous(s.rows())).toBe(true);
+  });
+
+  it('resize: shortening hands the time to the slot after it', async () => {
+    const s = await staged();
+    const [a, b] = [s.full[0]!, s.full[1]!];
+    const newEnd = a.start + 2 * 60 * MIN;
+    expect(newEnd).toBeLessThan(a.end);
+    await stageEdit(s.deps, 'Test', { kind: 'resize', start: a.start, end: newEnd });
+    const rows = s.rows();
+    expect(rows.find((r) => r.start === a.start)).toMatchObject({ end: newEnd });
+    expect(rows.find((r) => r.start === newEnd)).toMatchObject({ end: b.end, slotId: b.slotId });
+    expect(rows.find((r) => r.start === b.start)).toBeUndefined();
+    expect(contiguous(rows)).toBe(true);
+  });
+
+  it('add: a slot with its pin splits the slot it sits in, and the rest carries on', async () => {
+    const s = await staged();
+    const big = s.full.find((r) => r.end - r.start >= 6 * 60 * MIN)!;
+    const start = big.start + 60 * MIN;
+    const end = start + 60 * MIN;
+    const pin = { id: 'ep9', title: 'Show A "Ep 9"', duration: 22 * MIN + 1000 };
+    const r = await stageEdit(s.deps, 'Test', { kind: 'add', start, end, pin });
+    expect(r.kept.find((k) => k.start === start)!.programs).toEqual(['ep9']);
+    const rows = s.rows();
+    expect(rows.find((x) => x.start === big.start)).toMatchObject({ end: start });
+    expect(rows.find((x) => x.start === start)).toMatchObject({ end, slotId: `added@${start}`, pool: null, pins: { 1: pin } });
+    expect(rows.find((x) => x.start === end)).toMatchObject({ end: big.end, slotId: big.slotId });
+    expect(contiguous(rows)).toBe(true);
+    for (const x of rows) expect(x.planned.items.reduce((a, i) => a + i.duration, 0)).toBe(x.end - x.start);
+  });
+
+  it('a shaped day survives planning again and is what the worker commits', async () => {
+    const s = await staged();
+    const big = s.full.find((r) => r.end - r.start >= 6 * 60 * MIN)!;
+    const start = big.start + 60 * MIN;
+    await stageEdit(s.deps, 'Test', { kind: 'add', start, end: start + 60 * MIN, pin: { id: 'ep9', title: 'x', duration: 22 * MIN + 1000 } });
+    const before = JSON.stringify(s.rows().map((r) => [r.start, r.end, r.slotId, r.planned.programs]));
+    await stageGenerate(s.deps, 'Test', { to: s.store.channel('Test')!.edge + 4 * DAY });
+    expect(JSON.stringify(s.rows().map((r) => [r.start, r.end, r.slotId, r.planned.programs]))).toBe(before);
+    const r = await topUp(s.deps, 'Test');
+    expect(r.planned!.find((p) => p.start === start)!.programs).toEqual(['ep9']);
+  });
+
+  it('refuses what it cannot do, and changes nothing', async () => {
+    const s = await staged();
+    const [a, b] = [s.full[0]!, s.full[1]!];
+    const before = JSON.stringify(s.rows());
+    await expect(stageEdit(s.deps, 'Test', { kind: 'delete', start: a.start + 15 * MIN })).rejects.toThrow(/no slot is staged/);
+    await expect(stageEdit(s.deps, 'Test', { kind: 'resize', start: a.start, end: a.start + 7 * MIN })).rejects.toThrow(/grid/);
+    await expect(stageEdit(s.deps, 'Test', { kind: 'resize', start: a.start, end: a.start })).rejects.toThrow(/after the slot starts/);
+    await expect(stageEdit(s.deps, 'Test', { kind: 'add', start: a.start, end: a.start, pin: { id: 'ep9', title: 'x', duration: 1000 } })).rejects.toThrow(/after the start/);
+    s.store.setLocked('Test', b.start, true);
+    await expect(stageEdit(s.deps, 'Test', { kind: 'delete', start: b.start })).rejects.toThrow(/locked/);
+    await expect(stageEdit(s.deps, 'Test', { kind: 'resize', start: a.start, end: b.end + 15 * MIN })).rejects.toThrow(/locked/);
+    s.store.setLocked('Test', b.start, false);
+    expect(JSON.stringify(s.rows())).toBe(before);
   });
 });
 

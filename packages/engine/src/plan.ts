@@ -8,7 +8,7 @@ import { emptyBag, markDrawn, orderedPick, pickFromBag, type BagState, type Sequ
 import type { RngState } from './rng.js';
 import type {
   ExceptionDef, Item, ItemPosition, LockConflict, Library, PlanInput, PlanResult, PlanWarning, PlanWarningCode, PlannedSlot, Pool,
-  Schedule, SlotDef, WarningSeverity,
+  Schedule, SlotDef, StagedWindow, WarningSeverity,
 } from './schedule.js';
 import { DAY, HOUR, MINUTE, isOnGrid, type Ms } from './time.js';
 
@@ -22,7 +22,13 @@ interface Window {
   exception?: ExceptionDef;
   /** Block number to a pinned program id. */
   pins?: Readonly<Record<number, string>>;
+  /** A slot added by hand: no pool, only pinned blocks. */
+  added?: true;
 }
+
+const ADDED_PREFIX = 'added@';
+/** The pool name of a slot added by hand. It is in no schedule. */
+const ADDED_POOL = '';
 
 /** The planner's working copy of the state. Cloned for trials, adopted on success. */
 interface Work {
@@ -84,7 +90,7 @@ export function plan(input: PlanInput): PlanResult {
   const pinsLeft = new Map((input.pins ?? []).map((p) => [p.start, p.blocks]));
   const conflicts: LockConflict[] = [];
   const slots: PlannedSlot[] = [];
-  for (const w of windowsFor(schedule, input.from, input.to, input.exact === true, work)) {
+  for (const w of windowsFor(schedule, input.from, input.to, input.exact === true, work, input.windows ?? [])) {
     const held = locked.get(w.start);
     locked.delete(w.start);
     if (held) {
@@ -153,8 +159,10 @@ function checkLocked(ctx: Ctx, w: Window, held: PlannedSlot): LockConflict | und
  * advance, programs and clips are marked as drawn. The slot's own items are used as stored.
  */
 function applyLockedEffect(ctx: Ctx, work: Work, w: Window, held: PlannedSlot): void {
-  const pool = ctx.schedule.pools[w.slot.pool]!;
-  if (held.exception) {
+  const pool = ctx.schedule.pools[w.slot.pool];
+  if (!pool) {
+    // A slot added by hand has no pool: only its clips count.
+  } else if (held.exception) {
     countExceptionPick(ctx, work, w, pool);
   } else if (pool.order === 'shuffled') {
     for (const id of held.programs) work.bags[poolKey(w.slot.pool)] = markDrawn(work.bags[poolKey(w.slot.pool)] ?? emptyBag(), id);
@@ -214,7 +222,7 @@ function blockAdsOf(schedule: Schedule): BlockAds {
 // Windows: the stretch of time each slot owns, on the schedule's clock.
 // ---------------------------------------------------------------------------------------------
 
-function windowsFor(schedule: Schedule, from: Ms, to: Ms, exact: boolean, work: Work): Window[] {
+function windowsFor(schedule: Schedule, from: Ms, to: Ms, exact: boolean, work: Work, staged: readonly StagedWindow[]): Window[] {
   if (to <= from) return [];
   const starts: { start: Ms; slot: SlotDef }[] = [];
   let day = startOfLocalDay(schedule.zone, from - 8 * DAY);
@@ -251,7 +259,42 @@ function windowsFor(schedule: Schedule, from: Ms, to: Ms, exact: boolean, work: 
     );
     out.push({ start, end, slot: s.slot, slotId, ...(exception ? { exception } : {}) });
   }
-  return out;
+  return staged.length === 0 ? out : shapeWindows(schedule, out, staged, from, to, exact, work);
+}
+
+/** Lets windows shaped by hand take their span; the schedule's windows are cut around them. */
+function shapeWindows(schedule: Schedule, base: Window[], staged: readonly StagedWindow[], from: Ms, to: Ms, exact: boolean, work: Work): Window[] {
+  const mine = [...staged].sort((a, b) => a.start - b.start);
+  for (let i = 1; i < mine.length; i++) {
+    if (mine[i]!.start < mine[i - 1]!.end) throw new RangeError(`two shaped windows overlap at ${mine[i]!.start}`);
+  }
+  const out: Window[] = [];
+  for (const b of base) {
+    let at = b.start;
+    for (const m of mine) {
+      if (m.end <= at || m.start >= b.end) continue;
+      if (m.start > at) out.push({ ...b, start: at, end: m.start });
+      at = Math.max(at, m.end);
+    }
+    if (at < b.end) out.push({ ...b, start: at, end: b.end });
+  }
+  for (const m of mine) {
+    const start = Math.max(m.start, from);
+    const end = exact ? Math.min(m.end, to) : m.end;
+    if (start >= to || end <= start) continue;
+    if (m.slotId.startsWith(ADDED_PREFIX)) {
+      out.push({ start, end, slot: { day: -1, at: -1, pool: ADDED_POOL }, slotId: m.slotId, added: true });
+      continue;
+    }
+    const slot = schedule.week.find((s) => slotIdOf(s) === m.slotId);
+    if (!slot) {
+      warn(work, 'pin-dropped', 'warning', start, m.slotId, 'a slot shaped by hand came from a week slot that is no longer in the schedule, so it was treated as an added slot');
+      out.push({ start, end, slot: { day: -1, at: -1, pool: ADDED_POOL }, slotId: m.slotId, added: true });
+      continue;
+    }
+    out.push({ start, end, slot, slotId: m.slotId });
+  }
+  return out.filter((w) => w.end > w.start && w.start < to).sort((a, b) => a.start - b.start);
 }
 
 /**
@@ -289,21 +332,25 @@ function warn(work: Work, code: PlanWarningCode, severity: WarningSeverity, at: 
 
 function planWindow(ctx: Ctx, work: Work, w: Window): PlannedSlot {
   const { schedule } = ctx;
-  const pool = schedule.pools[w.slot.pool]!;
+  const pool = w.added ? undefined : schedule.pools[w.slot.pool]!;
   let result: { placed: Placed[]; edges: Edges; explicit: boolean } | undefined;
-  if (w.exception) {
+  if (w.added) {
+    // No pool: only what is pinned. Anything not pinned is filler, then dead air.
+    const r = placeBlocks(ctx, work, w, { kind: 'list', ids: [], explicit: false });
+    result = { placed: r.placed, edges: r.edges, explicit: false };
+  } else if (w.exception) {
     const trial = cloneWork(work);
     const attempt = placeBlocks(ctx, trial, w, { kind: 'list', ids: [w.exception.programId], explicit: true });
     if (attempt.placed.length === 1) {
       adopt(work, trial);
-      countExceptionPick(ctx, work, w, pool);
+      countExceptionPick(ctx, work, w, pool!);
       result = { placed: attempt.placed, edges: attempt.edges, explicit: true };
     } else {
       warn(work, 'exception-does-not-fit', 'alert', w.start, w.slotId,
         `the exception program (${w.exception.programId}) does not fit this slot, so the slot is planned as usual`);
     }
   }
-  result ??= planNormally(ctx, work, w, pool);
+  result ??= planNormally(ctx, work, w, pool!);
 
   const { placed, edges } = result;
   const items = layoutItems(ctx, work, w, placed, edges);

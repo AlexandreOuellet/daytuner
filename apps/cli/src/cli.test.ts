@@ -266,6 +266,33 @@ describe('the command line', () => {
     expect(said()).toMatch(/2026-11-18 20:00 to [^\n]*\[locked\][^\n]*\n    CONFLICT \(duration-changed\)/);
   });
 
+  it('deletes, resizes and adds staged slots, and shows the shaped result', async () => {
+    await run('channel', 'add', join(dir, 'test.yaml'));
+    await run('stage', 'Test', 'generate', '--to', '2026-11-21', '--keep', '2026-11-18..2026-11-21');
+    out.length = 0;
+    expect(await run('stage', 'Test', 'delete', '2026-11-18T20:00')).toBe(0);
+    expect(said()).toContain('the slot before it now runs through its time');
+    out.length = 0;
+    await run('stage', 'Test', 'show');
+    expect(said()).toMatch(/2026-11-18 08:00 to 2026-11-19 08:00[^\n]*\[shaped\]/);
+    expect(said()).not.toContain('2026-11-18 20:00 to');
+    out.length = 0;
+    expect(await run('stage', 'Test', 'add', '2026-11-19T10:00', '--end', '2026-11-19T11:00', 'episode:Show A/Ep 9')).toBe(0);
+    expect(said()).toContain('Added a slot from 2026-11-19 10:00 to 2026-11-19 11:00 with Show A "Ep 9" pinned to block 1');
+    out.length = 0;
+    await run('stage', 'Test', 'show');
+    expect(said()).toMatch(/2026-11-19 10:00 to 2026-11-19 11:00 +added[^\n]*pinned: block 1 = Show A "Ep 9"/);
+    expect(said()).toMatch(/2026-11-19 11:00 to 2026-11-19 20:00[^\n]*\[shaped\]/);
+    out.length = 0;
+    expect(await run('stage', 'Test', 'resize', '2026-11-19T08:00', '--end', '2026-11-19T10:07')).not.toBe(0);
+    expect(errs.join('\n')).toContain('grid');
+    expect(await run('stage', 'Test', 'resize', '2026-11-19T08:00', '--end', '2026-11-19T09:00')).toBe(0);
+    out.length = 0;
+    await run('stage', 'Test', 'show');
+    expect(said()).toMatch(/2026-11-19 08:00 to 2026-11-19 09:00/);
+    expect(said()).toMatch(/2026-11-19 09:00 to 2026-11-19 11:00 +added/); // the freed hour went to the slot after it
+  });
+
   it('previews without a store', async () => {
     expect(await run('preview', join(dir, 'test.yaml'), '--days', '2', '--from', '2026-11-09T00:00:00Z')).toBe(0);
     expect(said()).toContain('grid accuracy');

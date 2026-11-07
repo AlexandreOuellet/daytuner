@@ -3,9 +3,9 @@
 // agree about where the lineup ends, and it records every commit so that a crash can be resolved.
 // Rules: docs/architecture.md, "Worker".
 
-import { adjustSequence, plan, type Clock, type CursorAdjustment, type LockConflict, type PlannedSlot, type PlanWarning, type Schedule } from '@daytuner/engine';
+import { adjustSequence, plan, type Clock, type StagedWindow, type CursorAdjustment, type LockConflict, type PlannedSlot, type PlanWarning, type Schedule } from '@daytuner/engine';
 import { parseScheduleFile, resolveSchedule } from '@daytuner/schedule';
-import type { ChannelRecord, CommitRecord, Store } from '@daytuner/store';
+import type { ChannelRecord, CommitRecord, PinRecord, StagedSlotRecord, Store } from '@daytuner/store';
 import { alignToGrid, appendVerified, toLineupItems, totalDuration, type LineupItem, type TunarrClient } from '@daytuner/tunarr-client';
 
 /** Two ends closer than this are the same: Tunarr's durations carry fractions that are rounded. */
@@ -79,7 +79,7 @@ function stagedInputs(
   edge: number,
   library: { programs: Record<string, { duration: number }> },
   titles: Record<string, string>,
-): { locked: PlannedSlot[]; pins: { start: number; blocks: Record<number, string> }[] } {
+): { locked: PlannedSlot[]; pins: { start: number; blocks: Record<number, string> }[]; windows: StagedWindow[] } {
   const staged = store.stagedSlots(ch.id, edge);
   const pins: { start: number; blocks: Record<number, string> }[] = [];
   for (const s of staged) {
@@ -92,7 +92,8 @@ function stagedInputs(
     }
     pins.push({ start: s.start, blocks });
   }
-  return { locked: staged.filter((s) => s.locked).map((s) => s.planned), pins };
+  const windows = staged.filter((s) => s.edited && s.slotId).map((s) => ({ start: s.start, end: s.end, slotId: s.slotId! }));
+  return { locked: staged.filter((s) => s.locked).map((s) => s.planned), pins, windows };
 }
 
 export async function topUp(deps: WorkerDeps, channelName: string, opts: TopUpOptions = {}): Promise<TopUpResult> {
@@ -131,8 +132,8 @@ export async function topUp(deps: WorkerDeps, channelName: string, opts: TopUpOp
 
   const { schedule, library, fillerListIds, titles } = await resolveSchedule(parseScheduleFile(ch.schedule), client);
   const { from, flex } = alignToGrid(edgeNow, schedule.grid);
-  const { locked, pins } = stagedInputs(store, ch, edgeNow, library, titles);
-  const result = plan({ schedule, library, state: ch.state, from, to: now + ch.floorMs + ch.stepMs, locked, pins });
+  const { locked, pins, windows } = stagedInputs(store, ch, edgeNow, library, titles);
+  const result = plan({ schedule, library, state: ch.state, from, to: now + ch.floorMs + ch.stepMs, locked, pins, windows });
   if (result.slots.length === 0) return { action: 'none', ...base, warnings: result.warnings };
 
   const items: LineupItem[] = [...(flex > 0 ? [{ type: 'flex' as const, duration: flex }] : []), ...toLineupItems(result.slots, fillerListIds)];
@@ -280,8 +281,8 @@ export async function stageGenerate(
   const keepTo = range.keepTo ?? range.to;
   if (!(range.to > from)) throw new ConsistencyError('the end of the range is not after the end of the committed lineup');
   if (!(keepTo > keepFrom) || keepFrom < from || keepTo > range.to) throw new ConsistencyError('the part to keep must lie inside the range, after the committed lineup');
-  const { locked, pins } = stagedInputs(store, ch, from, library, titles);
-  const result = plan({ schedule, library, state: ch.state, from, to: range.to, locked, pins });
+  const { locked, pins, windows } = stagedInputs(store, ch, from, library, titles);
+  const result = plan({ schedule, library, state: ch.state, from, to: range.to, locked, pins, windows });
   const kept = result.slots.filter((s) => s.start >= keepFrom && s.start < keepTo);
   store.replaceStaged(channelName, keepFrom, keepTo, kept, clock.now());
   return { kept, planned: result.slots.length, warnings: result.warnings.filter((w) => kept.some((k) => w.at >= k.start && w.at < k.end)), titles };
@@ -308,14 +309,119 @@ export async function stageCheck(deps: Pick<WorkerDeps, 'store' | 'client'>, cha
   if (staged.length === 0) return { conflicts: [], pinProblems: [], titles: {} };
   const { schedule, library, titles } = await resolveSchedule(parseScheduleFile(ch.schedule), client);
   const { from } = alignToGrid(ch.edge, schedule.grid);
-  const { locked, pins } = stagedInputs(store, ch, from, library, titles);
+  const { locked, pins, windows } = stagedInputs(store, ch, from, library, titles);
   const to = Math.max(...staged.map((s) => s.start)) + 1;
-  const result = plan({ schedule, library, state: ch.state, from, to, locked, pins });
+  const result = plan({ schedule, library, state: ch.state, from, to, locked, pins, windows });
   return {
     conflicts: result.conflicts,
     pinProblems: result.warnings.filter((w) => w.code === 'pin-does-not-fit' || w.code === 'pin-dropped'),
     titles,
   };
+}
+
+/**
+ * Plans the staged slots again from `from` to the last staged slot, keeping locks, pins and shapes. A change to
+ * one slot moves the places of the shows after it, so everything staged after it is planned again too.
+ */
+export async function stageRefresh(deps: Pick<WorkerDeps, 'store' | 'client' | 'clock'>, channelName: string, from: number): Promise<StageResult> {
+  const ch = deps.store.channel(channelName);
+  if (!ch) throw new ConsistencyError(`no channel named "${channelName}" in the store`);
+  const last = Math.max(from, ...deps.store.stagedSlots(ch.id).map((s) => s.start));
+  return stageGenerate(deps, channelName, { to: last + 1, keepFrom: from, keepTo: last + 1 });
+}
+
+export type StageEdit =
+  | { kind: 'delete'; start: number }
+  | { kind: 'resize'; start: number; end: number }
+  | { kind: 'add'; start: number; end: number; pin?: PinRecord };
+
+type RowInput = Omit<StagedSlotRecord, 'channelId' | 'generatedAt'>;
+
+/**
+ * Changes the shape of the staged slots, then plans the affected stretch again. Nothing is written to Tunarr.
+ * - delete: the staged slot just before it grows to take its time.
+ * - resize (a new end): the start never moves. Slots it now covers are removed, one it partly covers starts where
+ *   this one now ends, and when it shrinks the slot after it starts earlier, so no time is left empty.
+ * - add: a slot with no pool, whose content is its pin. Slots it overlaps are cut around it (one that contains it
+ *   is split in two).
+ * A locked slot is never changed: unlock it first.
+ */
+export async function stageEdit(deps: Pick<WorkerDeps, 'store' | 'client' | 'clock'>, channelName: string, edit: StageEdit): Promise<StageResult> {
+  const { store, clock } = deps;
+  const ch = store.channel(channelName);
+  if (!ch) throw new ConsistencyError(`no channel named "${channelName}" in the store`);
+  const grid = parseScheduleFile(ch.schedule).grid;
+  const rows = store.stagedSlots(ch.id);
+  const remove = new Set<number>();
+  const put = new Map<number, RowInput>();
+  const asInput = (r: StagedSlotRecord): RowInput => ({ start: r.start, end: r.end, slotId: r.slotId, pool: r.pool, pins: r.pins, locked: r.locked, edited: r.edited, planned: r.planned });
+  const reshape = (row: StagedSlotRecord, patch: { start?: number; end?: number }): void => {
+    if (row.locked) throw new ConsistencyError(`the slot starting ${row.start} is locked; unlock it first`);
+    const next: RowInput = { ...(put.get(row.start) ?? asInput(row)), ...patch, edited: true };
+    if (patch.start !== undefined && patch.start !== row.start) {
+      remove.add(row.start);
+      put.delete(row.start);
+    }
+    put.set(next.start, next);
+  };
+  const dropRow = (row: StagedSlotRecord): void => {
+    if (row.locked) throw new ConsistencyError(`the slot starting ${row.start} is locked; unlock it first`);
+    remove.add(row.start);
+    put.delete(row.start);
+  };
+  const needGrid = (t: number, what: string): void => {
+    if (t % grid !== 0) throw new ConsistencyError(`the ${what} must be on the ${grid / 60_000}-minute grid`);
+  };
+  const atStart = (start: number): StagedSlotRecord => {
+    const r = rows.find((x) => x.start === start);
+    if (!r) throw new ConsistencyError('no slot is staged starting then');
+    return r;
+  };
+
+  if (edit.kind === 'delete') {
+    const r = atStart(edit.start);
+    const prev = rows.find((x) => x.end === r.start);
+    if (!prev) throw new ConsistencyError('no staged slot ends where this one starts, so nothing could grow to take its time; resize the one before it instead');
+    reshape(prev, { end: r.end });
+    dropRow(r);
+  } else if (edit.kind === 'resize') {
+    const r = atStart(edit.start);
+    needGrid(edit.end, 'new end');
+    if (edit.end <= r.start) throw new ConsistencyError('the new end must be after the slot starts');
+    if (edit.end > r.end) {
+      for (const o of rows) {
+        if (o.start < r.end || o.start >= edit.end) continue;
+        if (o.end <= edit.end) dropRow(o);
+        else reshape(o, { start: edit.end });
+      }
+    } else if (edit.end < r.end) {
+      const next = rows.find((x) => x.start === r.end);
+      if (next) reshape(next, { start: edit.end });
+    }
+    reshape(r, { end: edit.end });
+  } else {
+    if (!(edit.end > edit.start)) throw new ConsistencyError('the end must be after the start');
+    needGrid(edit.start, 'start');
+    needGrid(edit.end, 'end');
+    if (edit.start < ch.edge) throw new ConsistencyError('a slot can only be added after the end of the committed lineup');
+    for (const o of rows) {
+      if (o.end <= edit.start || o.start >= edit.end) continue;
+      if (o.start >= edit.start && o.end <= edit.end) dropRow(o);
+      else if (o.start < edit.start && o.end > edit.end) {
+        // The new slot sits inside this one: the earlier part stays, the rest carries on after it.
+        reshape(o, { end: edit.start });
+        put.set(edit.end, { ...asInput(o), start: edit.end, pins: {}, edited: true });
+      } else if (o.start < edit.start) reshape(o, { end: edit.start });
+      else reshape(o, { start: edit.end });
+    }
+    const id = `added@${edit.start}`;
+    const empty: PlannedSlot = { slotId: id, start: edit.start, end: edit.end, pool: '', programs: [], blocks: [], exception: false, items: [] };
+    put.set(edit.start, { start: edit.start, end: edit.end, slotId: id, pool: null, pins: edit.pin ? { 1: edit.pin } : {}, locked: false, edited: true, planned: empty });
+  }
+
+  const first = Math.min(...remove, ...put.keys());
+  store.restructure(channelName, [...remove], [...put.values()], clock.now());
+  return stageRefresh(deps, channelName, first);
 }
 
 export interface SequenceInfo {

@@ -292,6 +292,18 @@ describe('staged slots', () => {
     expect(() => store.setPin('funny', 4242, 1, { id: 'x', title: 'x', duration: 1 })).toThrow(/no slot is staged/);
   });
 
+  it('restructures rows in one step, keeps the edited flag through planning again, and refuses one before the edge', () => {
+    store.replaceStaged('funny', 1000, 9000, [slot(2000, 3000), slot(3000, 4000)], 1);
+    const [a, b] = store.stagedSlots(id);
+    store.restructure('funny', [3000], [{ ...a!, end: 4000, edited: true, planned: a!.planned }], 2);
+    expect(store.stagedSlots(id).map((s) => [s.start, s.end, s.edited])).toEqual([[2000, 4000, true]]);
+    store.replaceStaged('funny', 1000, 9000, [slot(2000, 4000)], 3);
+    expect(store.stagedSlots(id)[0]!.edited).toBe(true);
+    expect(() => store.restructure('funny', [], [{ ...b!, start: 500 }], 4)).toThrow(/at or after the end/);
+    store.restructure('funny', [], [{ ...b!, start: 5000, end: 6000, slotId: 'added@5000', pool: null }], 5);
+    expect(store.stagedSlots(id).find((s) => s.start === 5000)).toMatchObject({ slotId: 'added@5000', pool: null });
+  });
+
   it('drops the staged slots a completed commit has put in Tunarr', () => {
     store.replaceStaged('funny', 1000, 9000, [slot(2000, 3000), slot(5000, 6000)], 1);
     const c = store.beginCommit({ channelId: id, fromEdge: 1000, toEdge: 4000, state: state(2), items: 1, totalMs: 3000, slots: [], at: 1 });

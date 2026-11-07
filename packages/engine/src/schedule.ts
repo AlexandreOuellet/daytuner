@@ -165,6 +165,22 @@ export interface PlanInput {
    * slot; one that does not fit, or names a block the slot does not have, is dropped with a warning.
    */
   pins?: readonly { start: Ms; blocks: Readonly<Record<number, string>> }[];
+  /**
+   * Windows shaped by hand. Where one lies, the schedule's windows give way: one that began before it ends
+   * where it starts, one that reaches past it carries on from its end.
+   */
+  windows?: readonly StagedWindow[];
+}
+
+/**
+ * A window the owner shaped by hand (resized, cut back, or added): it replaces the schedule's own windows in
+ * its span. `slotId` names the week slot it comes from (`day@time`), or begins with `added@` for a slot with no
+ * pool, whose content is only what is pinned to it.
+ */
+export interface StagedWindow {
+  start: Ms;
+  end: Ms;
+  slotId: string;
 }
 
 export type LockConflictReason = 'window-changed' | 'program-gone' | 'duration-changed' | 'clip-gone';

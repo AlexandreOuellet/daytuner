@@ -19,7 +19,7 @@ import { alignToGrid, TunarrClient, type FetchLike } from '@daytuner/tunarr-clie
 import { ceilToGrid, computeMetrics, DAY, emptyPlanState, plan, type Clock } from '@daytuner/engine';
 import { diffLines, findProgram, formatDiff, parseDuration, parseLocalDateTime, parseScheduleFile, resolveSchedule } from '@daytuner/schedule';
 import { Store } from '@daytuner/store';
-import { adjustCursor, adoptHistory, ConsistencyError, listSequences, placesFromLineup, resync, stageCheck, stageGenerate, topUp } from '@daytuner/worker';
+import { adjustCursor, adoptHistory, ConsistencyError, listSequences, placesFromLineup, resync, stageCheck, stageEdit, stageGenerate, stageRefresh, topUp } from '@daytuner/worker';
 import { formatMetrics, formatWarnings, inZone, slotLabel } from './format.js';
 
 export interface CliEnv {
@@ -38,7 +38,8 @@ const USAGE = `Usage:
   daytuner channel revisions <name> | diff <name> [from [to]] | rollback <name> <number>
   daytuner channel list | status <name> | commits <name> | adopt-history <name> [--yes] | resync <name> [--yes]
   daytuner stage <name> generate --to DATE [--keep DATE..DATE] | show [--from DATE] [--to DATE] | lock DATETIME | unlock DATETIME
-                   | pin DATETIME BLOCK movie:TITLE | pin DATETIME BLOCK episode:SHOW/TITLE | unpin DATETIME BLOCK | clear [--from DATE] [--to DATE]
+                   | pin DATETIME BLOCK movie:TITLE | pin DATETIME BLOCK episode:SHOW/TITLE | unpin DATETIME BLOCK
+                   | delete DATETIME | resize DATETIME --end DATE | add DATETIME --end DATE movie:TITLE | clear [--from DATE] [--to DATE]
                                         (dates are local to the channel: 2026-10-31 or 2026-10-31T20:00)
   daytuner run <name> [--yes]            (a dry run without --yes)
   daytuner cursor <name> list | rewind <sequence> <k> | set <sequence> <episode-number>
@@ -54,7 +55,7 @@ export async function runCli(argv: string[], io: CliEnv): Promise<number> {
     options: {
       tunarr: { type: 'string' }, db: { type: 'string' }, channel: { type: 'string' }, from: { type: 'string' },
       days: { type: 'string', default: '7' }, seed: { type: 'string', default: '1' },
-      to: { type: 'string' }, keep: { type: 'string' },
+      to: { type: 'string' }, keep: { type: 'string' }, end: { type: 'string' },
       floor: { type: 'string', default: '7d' }, step: { type: 'string', default: '24h' }, yes: { type: 'boolean', default: false },
     },
   });
@@ -284,7 +285,7 @@ export async function runCli(argv: string[], io: CliEnv): Promise<number> {
           if (slot) troubled.set(slot.start, [...(troubled.get(slot.start) ?? []), `${w.severity.toUpperCase()}: ${w.message}`]);
         }
         for (const s of slots) {
-          io.out(`${inZone(s.start, zone)} to ${inZone(s.end, zone)}  ${s.slotId ? slotLabel(s.slotId) : 'added'} ${s.pool ?? ''}${s.locked ? '  [locked]' : ''}  ${s.planned.programs.length} program(s)${Object.keys(s.pins).length ? `  pinned: ${Object.entries(s.pins).map(([n, p]) => `block ${n} = ${p.title}`).join(', ')}` : ''}`);
+          io.out(`${inZone(s.start, zone)} to ${inZone(s.end, zone)}  ${s.slotId ? slotLabel(s.slotId) : 'added'} ${s.pool ?? ''}${s.locked ? '  [locked]' : ''}${s.edited ? '  [shaped]' : ''}  ${s.planned.programs.length} program(s)${Object.keys(s.pins).length ? `  pinned: ${Object.entries(s.pins).map(([n, p]) => `block ${n} = ${p.title}`).join(', ')}` : ''}`);
           for (const t of troubled.get(s.start) ?? []) io.out(`    ${t}`);
         }
         store.close();
@@ -306,7 +307,7 @@ export async function runCli(argv: string[], io: CliEnv): Promise<number> {
         const client = reader();
         const program = await findProgram(client, rest.slice(4).join(' '));
         store.setPin(name!, start, block, program);
-        const r = await stageGenerate({ store, client, clock: io.clock }, name!, { to: start + 1, keepFrom: start, keepTo: start + 1 });
+        const r = await stageRefresh({ store, client, clock: io.clock }, name!, start);
         io.out(`Pinned ${program.title} to block ${block} of the slot starting ${inZone(start, zone)}. The slot was planned again around it; nothing was written to Tunarr.`);
         const trouble = r.warnings.filter((w) => w.code === 'pin-does-not-fit' || w.code === 'pin-dropped');
         for (const w of trouble) io.out(`${w.severity.toUpperCase()}: ${w.message}`);
@@ -317,8 +318,40 @@ export async function runCli(argv: string[], io: CliEnv): Promise<number> {
       if (sub === 'unpin' && rest[2] && rest[3]) {
         const start = parseLocalDateTime(zone, rest[2]);
         store.removePin(name!, start, Number(rest[3]));
-        await stageGenerate({ store, client: reader(), clock: io.clock }, name!, { to: start + 1, keepFrom: start, keepTo: start + 1 });
+        await stageRefresh({ store, client: reader(), clock: io.clock }, name!, start);
         io.out(`Removed the pin on block ${rest[3]} of the slot starting ${inZone(start, zone)}. The slot was planned again.`);
+        store.close();
+        return 0;
+      }
+      if (sub === 'delete' && rest[2]) {
+        const start = parseLocalDateTime(zone, rest[2]);
+        const r = await stageEdit({ store, client: reader(), clock: io.clock }, name!, { kind: 'delete', start });
+        io.out(`Deleted the slot starting ${inZone(start, zone)}; the slot before it now runs through its time. Nothing was written to Tunarr.`);
+        io.out(`\n${formatWarnings(r.warnings, zone, r.titles)}`);
+        store.close();
+        return 0;
+      }
+      if (sub === 'resize' && rest[2]) {
+        const start = parseLocalDateTime(zone, rest[2]);
+        const end = date(values.end);
+        if (end === undefined) throw new Error('give the new end with --end DATE');
+        const r = await stageEdit({ store, client: reader(), clock: io.clock }, name!, { kind: 'resize', start, end });
+        io.out(`The slot starting ${inZone(start, zone)} now ends ${inZone(end, zone)}. The slots around it were adjusted so no time is left empty. Nothing was written to Tunarr.`);
+        io.out(`\n${formatWarnings(r.warnings, zone, r.titles)}`);
+        store.close();
+        return 0;
+      }
+      if (sub === 'add' && rest[2] && rest[3]) {
+        const start = parseLocalDateTime(zone, rest[2]);
+        const end = date(values.end);
+        if (end === undefined) throw new Error('give the end with --end DATE');
+        const client = reader();
+        const program = await findProgram(client, rest.slice(3).join(' '));
+        const r = await stageEdit({ store, client, clock: io.clock }, name!, { kind: 'add', start, end, pin: program });
+        io.out(`Added a slot from ${inZone(start, zone)} to ${inZone(end, zone)} with ${program.title} pinned to block 1. The slots it overlaps were cut around it. Nothing was written to Tunarr.`);
+        const trouble = r.warnings.filter((w) => w.code === 'pin-does-not-fit' || w.code === 'pin-dropped');
+        for (const w of trouble) io.out(`${w.severity.toUpperCase()}: ${w.message}`);
+        io.out(`\n${formatWarnings(r.warnings.filter((w) => !trouble.includes(w)), zone, r.titles)}`);
         store.close();
         return 0;
       }

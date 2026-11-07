@@ -63,6 +63,8 @@ export interface StagedSlotRecord {
   /** Block number (1 is the first) to the program pinned there. */
   pins: Record<number, PinRecord>;
   locked: boolean;
+  /** Shaped by hand (resized, cut back or added), so its window is not the schedule's own. */
+  edited: boolean;
   /** The slot as last generated: its blocks and items. */
   planned: PlannedSlot;
   generatedAt: number;
@@ -176,6 +178,7 @@ create table if not exists staged_slots (
   pool text,
   pins text not null default '{}',
   locked integer not null default 0,
+  edited integer not null default 0,
   planned text not null,
   generated_at integer not null,
   primary key (channel_id, start)
@@ -229,6 +232,8 @@ export class Store {
     // A database made before commits had notes gets the column.
     const cols = db.prepare('pragma table_info(commits)').all() as { name: string }[];
     if (!cols.some((c) => c.name === 'note')) db.exec('alter table commits add column note text');
+    const stagedCols = db.prepare('pragma table_info(staged_slots)').all() as { name: string }[];
+    if (!stagedCols.some((c) => c.name === 'edited')) db.exec('alter table staged_slots add column edited integer not null default 0');
     // A database made before revisions: its schedule becomes revision 1, saved at time 0 (unknown).
     const chCols = db.prepare('pragma table_info(channels)').all() as { name: string }[];
     if (!chCols.some((c) => c.name === 'revision')) db.exec('alter table channels add column revision integer not null default 1');
@@ -422,12 +427,30 @@ export class Store {
       const old = this.stagedSlots(ch.id, from, to);
       const lockedStarts = new Set(old.filter((o) => o.locked).map((o) => o.start));
       const pinsOf = new Map(old.map((o) => [o.start, o.pins]));
+      const editedOf = new Map(old.map((o) => [o.start, o.edited]));
       this.db.prepare('delete from staged_slots where channel_id = ? and start >= ? and start < ? and locked = 0').run(ch.id, from, to);
-      const ins = this.db.prepare('insert into staged_slots (channel_id, start, end, slot_id, pool, pins, locked, planned, generated_at) values (?, ?, ?, ?, ?, ?, 0, ?, ?)');
+      const ins = this.db.prepare('insert into staged_slots (channel_id, start, end, slot_id, pool, pins, locked, edited, planned, generated_at) values (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)');
       for (const sl of slots) {
         if (lockedStarts.has(sl.start)) continue;
-        ins.run(ch.id, sl.start, sl.end, sl.slotId, sl.pool, JSON.stringify(pinsOf.get(sl.start) ?? {}), JSON.stringify(sl), at);
+        ins.run(ch.id, sl.start, sl.end, sl.slotId, sl.pool === '' ? null : sl.pool, JSON.stringify(pinsOf.get(sl.start) ?? {}), editedOf.get(sl.start) ? 1 : 0, JSON.stringify(sl), at);
       }
+    });
+  }
+
+  /**
+   * Changes the shape of staged slots in one step: removes the rows that start at `remove`, then stores `put`
+   * (replacing a row at the same start). The `planned` of a stored row may be stale until the slot is planned again.
+   * Refuses a row that starts before the committed edge.
+   */
+  restructure(name: string, remove: readonly number[], put: readonly Omit<StagedSlotRecord, 'channelId' | 'generatedAt'>[], at: number): void {
+    this.tx(() => {
+      const ch = this.channel(name);
+      if (!ch) throw new StoreError(`no channel named "${name}"`);
+      for (const r of put) if (r.start < ch.edge) throw new StoreError('staged slots must start at or after the end of the committed lineup');
+      const del = this.db.prepare('delete from staged_slots where channel_id = ? and start = ?');
+      for (const start of remove) del.run(ch.id, start);
+      const ins = this.db.prepare('insert or replace into staged_slots (channel_id, start, end, slot_id, pool, pins, locked, edited, planned, generated_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+      for (const r of put) ins.run(ch.id, r.start, r.end, r.slotId, r.pool, JSON.stringify(r.pins), r.locked ? 1 : 0, r.edited ? 1 : 0, JSON.stringify(r.planned), at);
     });
   }
 
@@ -465,7 +488,7 @@ export class Store {
         return {
           channelId, start: Number(o['start']), end: Number(o['end']),
           slotId: o['slot_id'] === null ? null : String(o['slot_id']), pool: o['pool'] === null ? null : String(o['pool']),
-          pins: JSON.parse(String(o['pins'])) as Record<number, PinRecord>, locked: Number(o['locked']) === 1,
+          pins: JSON.parse(String(o['pins'])) as Record<number, PinRecord>, locked: Number(o['locked']) === 1, edited: Number(o['edited']) === 1,
           planned: JSON.parse(String(o['planned'])) as PlannedSlot, generatedAt: Number(o['generated_at']),
         };
       });

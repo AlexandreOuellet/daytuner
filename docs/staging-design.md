@@ -89,7 +89,7 @@ daytuner stage <channel> clear [--from DATE --to DATE]
    a cursor, never resizes the slot.
 4. **Conflicts.** The validity checks, the regeneration and the log entry came with slice 2 (reasons: `window-changed`,
    `program-gone`, `duration-changed`, `clip-gone`). Regeneration keeps the slot's pins (slice 3). What is left: showing the conflicts a commit would record in `stage show`.
-5. **Structure edits.** Delete, add, resize a slot; cutting the neighbours. Tests on the cut rules.
+5. **Structure edits (built).** Delete, add, resize a slot; cutting the neighbours. Tests on the cut rules.
 6. **Preview diff.** What a change did to the slots around it, before commit. Revision dry-run against
    locked slots (from `architecture.md`).
 
@@ -112,3 +112,11 @@ daytuner stage <channel> clear [--from DATE --to DATE]
 - **Pins are written as text:** `movie:Title` or `episode:Show/Episode title`.
 - **A pin that does not fit** is an alert, and the block is planned from the pool as if there were no pin; the
   warning says how many minutes the program lasts and how many remain.
+- **Shaped windows.** A staged slot that was resized, cut back or added is `edited`, and is handed to the engine as a
+  window (`PlanInput.windows`); the schedule's windows give way around it. A window that began before it ends where
+  it starts, and one that reaches past it carries on from its end.
+- **Delete** extends the staged slot just before it. **Resize** takes a new end on the grid: the start never moves,
+  slots it covers are removed, one it partly covers starts where this one ends, and when it shrinks the slot after it
+  starts earlier. **Add** takes a start, an end and a pin: it has no pool, only the pinned program (anything else in it
+  is filler, then dead air), and slots it overlaps are cut around it, one that contains it split in two.
+- **Any change plans everything staged after it again**, because it moves the places of the shows downstream.

@@ -7,7 +7,8 @@ daytuner channel set-schedule <name> <channel.yaml>      (saves a new revision)
 daytuner channel revisions <name> | diff <name> [from [to]] | rollback <name> <number>
 daytuner channel list | status <name> | commits <name> | adopt-history <name> [--yes]
 daytuner stage <name> generate --to DATE [--keep DATE..DATE] | show [--from DATE] [--to DATE] | lock DATETIME | unlock DATETIME
-                   | pin DATETIME BLOCK movie:TITLE | pin DATETIME BLOCK episode:SHOW/TITLE | unpin DATETIME BLOCK | clear [--from DATE] [--to DATE]
+                   | pin DATETIME BLOCK movie:TITLE | pin DATETIME BLOCK episode:SHOW/TITLE | unpin DATETIME BLOCK
+                   | delete DATETIME | resize DATETIME --end DATE | add DATETIME --end DATE movie:TITLE | clear [--from DATE] [--to DATE]
 daytuner run <name> [--yes]
 daytuner cursor <name> list | rewind <sequence> <k> | set <sequence> <episode-number>
 ```
