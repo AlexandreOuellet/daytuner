@@ -3,7 +3,7 @@ import { emptyPlanState } from '@daytuner/engine';
 import { Store } from '@daytuner/store';
 import { FakeTunarr, TunarrClient } from '@daytuner/tunarr-client';
 import { CHAPTER_CACHE_LIFETIME_MS } from './chapters.js';
-import { adjustCursor, adoptHistory, revisionImpact, stageCheck, stageDiff, stageEdit, stageGenerate, stageRefresh, ConsistencyError, listSequences, resync, topUp, type WorkerDeps } from './worker.js';
+import { stageReset, adjustCursor, adoptHistory, revisionImpact, stageCheck, stageDiff, stageEdit, stageGenerate, stageRefresh, ConsistencyError, listSequences, resync, topUp, type WorkerDeps } from './worker.js';
 
 const DAY = 86_400_000;
 const MIN = 60_000;
@@ -677,3 +677,29 @@ describe('resync', () => {
   });
 });
 
+
+describe('resetting staged slots to the plan', () => {
+  it('drops shape and pins in a range, plans again, and keeps locked slots', async () => {
+    const s = setup();
+    const edge = s.store.channel('Test')!.edge;
+    await stageGenerate(s.deps, 'Test', { to: edge + 4 * DAY });
+    const id = s.store.channel('Test')!.id;
+    const plain = JSON.stringify(s.store.stagedSlots(id).map((r) => [r.start, r.end, r.slotId, r.planned.programs]));
+    const full = s.store.stagedSlots(id).filter((r) => r.start > edge + 30 * MIN);
+    const big = full.find((r) => r.end - r.start >= 6 * 60 * MIN)!;
+    await stageEdit(s.deps, 'Test', { kind: 'add', start: big.start + 60 * MIN, end: big.start + 120 * MIN, pin: { id: 'ep9', title: 'x', duration: 22 * MIN + 1000 } });
+    expect(s.store.stagedSlots(id).some((r) => r.edited)).toBe(true);
+
+    const r = await stageReset(s.deps, 'Test', { from: big.start, to: big.end });
+    expect(s.store.stagedSlots(id).some((x) => x.edited || Object.keys(x.pins).length > 0)).toBe(false);
+    expect(JSON.stringify(s.store.stagedSlots(id).map((x) => [x.start, x.end, x.slotId, x.planned.programs]))).toBe(plain);
+    expect(r.changes.some((c) => c.kind === 'removed' && c.slotId.startsWith('added@'))).toBe(true);
+
+    // A locked slot in the range stays as it is.
+    const other = s.store.stagedSlots(id).find((x) => x.pool === 'movies' && x.start > edge + 30 * MIN)!;
+    s.store.setLocked('Test', other.start, true);
+    await stageReset(s.deps, 'Test', { from: other.start, to: other.end });
+    expect(s.store.stagedSlots(id).find((x) => x.start === other.start)).toMatchObject({ locked: true });
+    await expect(stageReset(s.deps, 'Test', { from: 10, to: 5 })).rejects.toThrow(/after its start/);
+  });
+});

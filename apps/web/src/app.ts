@@ -1,17 +1,23 @@
 // The HTTP API. A thin layer over the same functions the command line calls, so the two cannot disagree. This
-// first slice only reads. Writing to Tunarr stays off unless the server is started with it switched on.
+// Writing to Tunarr stays off unless the server is started with it switched on (see actions.ts).
 
 import { Hono } from 'hono';
 import type { Clock } from '@daytuner/engine';
 import { diffLines, parseScheduleFile, ScheduleFileError } from '@daytuner/schedule';
 import { StoreError, type ChannelRecord, type Store } from '@daytuner/store';
+import { ConsistencyError } from '@daytuner/worker';
+import { ResolveError } from '@daytuner/schedule';
+import type { TunarrClient } from '@daytuner/tunarr-client';
+import { BadRequest, Forbidden, registerActions } from './actions.js';
 import { JobBusyError, Jobs } from './jobs.js';
 
 export interface AppDeps {
   store: Store;
   clock: Clock;
-  /** Whether this server may write to Tunarr. Reported by /api/health; nothing in this slice writes. */
-  writesEnabled: boolean;
+  /** Reads the library from Tunarr. Cannot write. */
+  client: TunarrClient;
+  /** Writes to Tunarr: given only when the server was started with writing switched on. */
+  writeClient?: TunarrClient;
   jobs?: Jobs;
 }
 
@@ -21,6 +27,7 @@ export const VERSION = '0.0.0';
 
 export function createApp(deps: AppDeps): Hono {
   const { store, clock } = deps;
+  const writesEnabled = deps.writeClient !== undefined;
   const jobs = deps.jobs ?? new Jobs(clock);
   const app = new Hono();
 
@@ -58,12 +65,13 @@ export function createApp(deps: AppDeps): Hono {
   app.onError((e, c) => {
     if (e instanceof NotFound) return c.json({ error: e.message }, 404);
     if (e instanceof JobBusyError) return c.json({ error: e.message, job: e.running }, 409);
-    if (e instanceof StoreError || e instanceof ScheduleFileError) return c.json({ error: e.message }, 400);
+    if (e instanceof Forbidden) return c.json({ error: e.message }, 403);
+    if (e instanceof BadRequest || e instanceof StoreError || e instanceof ScheduleFileError || e instanceof ResolveError || e instanceof ConsistencyError) return c.json({ error: e.message }, 400);
     return c.json({ error: 'internal error' }, 500);
   });
   app.notFound((c) => c.json({ error: 'not found' }, 404));
 
-  app.get('/api/health', (c) => c.json({ ok: true, version: VERSION, writes: deps.writesEnabled }));
+  app.get('/api/health', (c) => c.json({ ok: true, version: VERSION, writes: writesEnabled }));
 
   app.get('/api/channels', (c) => c.json(store.channels().map(summary)));
 
@@ -126,6 +134,8 @@ export function createApp(deps: AppDeps): Hono {
     if (!j) throw new NotFound(`no job ${c.req.param('id')}`);
     return c.json(j);
   });
+
+  registerActions(app, { store, clock, jobs, client: deps.client, ...(deps.writeClient ? { writeClient: deps.writeClient } : {}), channel });
 
   return app;
 }

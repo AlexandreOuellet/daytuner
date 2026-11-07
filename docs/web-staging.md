@@ -40,10 +40,11 @@ when writing is switched on).
   this day" stages the day again from the schedule. A locked slot is reset only after it is unlocked. There is no undo
   history because every edit plans everything after it again.
 
-## To build for this page (not in the engine or CLI yet)
+## To build for this page
 
-- **Reset a slot** (drop its `edited` flag, shape and pins, then plan again) and **reset a day** (clear the unlocked staged
-  slots in the day and stage it again). Both are small operations on top of what exists.
+- **Reset** is built (`stageReset` in the worker and `POST .../stage/reset`): it clears the unlocked staged slots in a range, plans
+  them again from the schedule, and plans everything staged after them again. A slot's own span resets that slot; a day's
+  span resets the day.
 - **A program search for the panel**: the library is read from Tunarr (movies and episodes by title), cached, and
   returned with its length, so a pin can be checked for fit as it is dragged.
 

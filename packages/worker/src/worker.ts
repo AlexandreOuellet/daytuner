@@ -3,7 +3,7 @@
 // agree about where the lineup ends, and it records every commit so that a crash can be resolved.
 // Rules: docs/architecture.md, "Worker".
 
-import { adjustSequence, diffSlots, plan, type SlotChange, type Clock, type StagedWindow, type CursorAdjustment, type LockConflict, type PlannedSlot, type PlanWarning, type Schedule } from '@daytuner/engine';
+import { adjustSequence, diffSlots, emptyPlanState, plan, type SlotChange, type Clock, type StagedWindow, type CursorAdjustment, type LockConflict, type PlannedSlot, type PlanWarning, type Schedule } from '@daytuner/engine';
 import { parseScheduleFile, resolveSchedule } from '@daytuner/schedule';
 import { cachedSource } from './chapters.js';
 import type { ChannelRecord, CommitRecord, PinRecord, StagedSlotRecord, Store } from '@daytuner/store';
@@ -400,6 +400,23 @@ export async function stageRefresh(
   return stageGenerate(deps, channelName, { to: last + 1, keepFrom: from, keepTo: last + 1, ...(before ? { before } : {}) });
 }
 
+/**
+ * Puts the staged slots that start in `[from, to)` back to what the schedule plans: their shape and pins are dropped
+ * and they are planned again, and so is everything staged after them (their places moved). Locked slots in the range
+ * are kept: unlock one first to reset it. Returns what changed.
+ */
+export async function stageReset(deps: Pick<WorkerDeps, 'store' | 'client' | 'clock'>, channelName: string, range: { from: number; to: number }): Promise<StageResult> {
+  const { store } = deps;
+  const ch = store.channel(channelName);
+  if (!ch) throw new ConsistencyError(`no channel named "${channelName}" in the store`);
+  if (!(range.to > range.from)) throw new ConsistencyError('the end of the range must be after its start');
+  const rows = store.stagedSlots(ch.id);
+  const before = rows.filter((r) => r.start >= range.from).map((r) => r.planned);
+  store.clearUnlockedStaged(channelName, range.from, range.to);
+  const last = Math.max(range.to - 1, ...rows.map((r) => r.start));
+  return stageGenerate(deps, channelName, { to: last + 1, keepFrom: range.from, keepTo: last + 1, before });
+}
+
 export type StageEdit =
   | { kind: 'delete'; start: number }
   | { kind: 'resize'; start: number; end: number }
@@ -493,6 +510,45 @@ export async function stageEdit(deps: Pick<WorkerDeps, 'store' | 'client' | 'clo
   const before = rows.filter((r) => r.start >= first).map((r) => r.planned);
   store.restructure(channelName, [...remove], [...put.values()], clock.now());
   return stageRefresh(deps, channelName, first, before);
+}
+
+export interface AddChannelOptions {
+  yaml: string;
+  /** The Tunarr channel to manage: its id, number or name. Defaults to the name in the channel file. */
+  tunarrChannel?: string;
+  floorMs: number;
+  stepMs: number;
+  seed: number;
+}
+
+export interface AddedChannel {
+  name: string;
+  tunarrName: string;
+  edge: number;
+  /** Where each ordered show stands in the channel's existing lineup (not applied: see adoptHistory). */
+  places: FoundPlace[];
+  notes: string[];
+  titles: Record<string, string>;
+}
+
+const slugOf = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+
+/**
+ * Adds a channel to the store from a channel file: finds the Tunarr channel, checks that the file fits the library,
+ * and starts from a fresh state at the end of the channel's lineup. Reads Tunarr; writes only to the store.
+ */
+export async function addChannel(deps: Pick<WorkerDeps, 'store' | 'client' | 'clock'>, o: AddChannelOptions): Promise<AddedChannel> {
+  const { store, client, clock } = deps;
+  const parsed = parseScheduleFile(o.yaml);
+  const wanted = o.tunarrChannel ?? parsed.channel;
+  const channels = await client.channels();
+  const ch = channels.find((c) => c.id === wanted || String(c.number) === wanted || slugOf(c.name) === slugOf(wanted));
+  if (!ch) throw new ConsistencyError(`no Tunarr channel matches "${wanted}" (channels: ${channels.map((c) => c.name).join(', ')})`);
+  const resolved = await resolveSchedule(parsed, cachedSource(client, store, clock));
+  const places = placesFromLineup(resolved.schedule, await client.lineup(ch.id));
+  const edge = ch.startTime + ch.duration;
+  store.addChannel({ name: parsed.channel, tunarrId: ch.id, floorMs: o.floorMs, stepMs: o.stepMs, schedule: o.yaml, state: emptyPlanState(o.seed), edge, at: clock.now() });
+  return { name: parsed.channel, tunarrName: ch.name, edge, places, notes: resolved.notes, titles: resolved.titles };
 }
 
 export interface SequenceInfo {

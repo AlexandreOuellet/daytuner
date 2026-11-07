@@ -11,7 +11,7 @@ Configuration is from the environment: `DAYTUNER_DB` (default `state/daytuner.db
 only this machine can reach it), `DAYTUNER_PORT` (default 8420), `DAYTUNER_ALLOW_WRITES=1` (default off: read only) and
 `TUNARR_URL`. There is no login: only expose it to people who may change your lineups.
 
-## API (read only so far)
+## API
 
 | Call | Gives |
 |---|---|
@@ -25,4 +25,29 @@ only this machine can reach it), `DAYTUNER_PORT` (default 8420), `DAYTUNER_ALLOW
 | `GET /api/channels/:name/commits?limit=` | the commit log |
 | `GET /api/jobs`, `/api/jobs/:id` | jobs: one running per channel at a time |
 
-Errors are `{ "error": message }` with 400 (bad input), 404 or 409 (the channel is busy).
+### Calls that change things
+
+A call that reads the library or plans answers `202 { job }` at once (poll `GET /api/jobs/:id`; the job's `result` holds
+the outcome); a quick store change answers directly. Times are epoch milliseconds or a local date or date-time in the
+channel's zone (`"2026-10-31"`, `"2026-10-31T20:00"`). Nothing writes to Tunarr except `run` with `dryRun: false`, which
+needs the server started with `DAYTUNER_ALLOW_WRITES=1`.
+
+| Call | Body | Does |
+|---|---|---|
+| `POST /api/channels` | `{ yaml, tunarrChannel?, floorMs?, stepMs?, seed? }` | job: add a channel from a channel file; reports where each show stands |
+| `POST /api/channels/:name/stage/generate` | `{ to, keepFrom?, keepTo? }` | job: plan a range and stage the kept part |
+| `POST .../stage/lock` | `{ start, locked }` | lock or unlock a staged slot |
+| `POST .../stage/pin`, `/unpin` | `{ start, block, program }` / `{ start, block }` | job: pin a program (`movie:Title`, `episode:Show/Title` or `{id,title,duration}`) to a block, or remove it |
+| `POST .../stage/edit` | `{ kind: delete\|resize\|add, start, end?, program? }` | job: reshape staged slots |
+| `POST .../stage/reset` | `{ from, to }` | job: put staged slots in a range back to what the schedule plans (locked slots stay) |
+| `POST .../stage/check`, `/diff` | | job: the conflicts the next commit would find; what staging changes compared with the plan |
+| `POST .../stage/clear` | `{ from?, to? }` | remove staged slots |
+| `POST .../schedule/check` | `{ yaml }` | job: dry-run a new schedule against locked staged slots |
+| `POST .../schedule` | `{ yaml, force? }` | job: save a new revision; refused (`saved: false`) when locked slots would not fit, unless `force` |
+| `POST .../schedule/rollback` | `{ revision }` | make an earlier revision current |
+| `GET .../cursors`, `POST .../cursors/adjust` | `{ key, kind: rewind\|set, amount }` | the shows' places; move one (and plan the staged slots again) |
+| `POST .../run` | `{ dryRun? }` | job: plan, or commit when `dryRun` is `false` and writing is on |
+| `POST .../resync`, `/adopt-history` | `{ apply? }` | settle a pending commit or adopt Tunarr's end; set shows' places from the lineup (dry run unless `apply`) |
+| `GET .../export` | | the schedule with the library's ids beside every title |
+
+Errors are `{ "error": message }` with 400 (bad input), 403 (writing is off), 404 or 409 (the channel is busy: the running job is in the body).

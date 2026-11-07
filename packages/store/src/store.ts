@@ -513,6 +513,13 @@ export class Store {
     if (Number(r.changes) === 0) throw new StoreError('no slot is staged starting then');
   }
 
+  /** Removes the unlocked staged slots that start inside `[from, to)`; locked ones stay. Returns how many. */
+  clearUnlockedStaged(name: string, from: number, to: number): number {
+    const ch = this.channel(name);
+    if (!ch) throw new StoreError(`no channel named "${name}"`);
+    return Number(this.db.prepare('delete from staged_slots where channel_id = ? and start >= ? and start < ? and locked = 0').run(ch.id, from, to).changes);
+  }
+
   /** Removes staged slots that start inside `[from, to)`, locked ones too. Returns how many. */
   clearStaged(name: string, from = Number.MIN_SAFE_INTEGER, to = Number.MAX_SAFE_INTEGER): number {
     const ch = this.channel(name);

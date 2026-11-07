@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { emptyPlanState, type PlannedSlot } from '@daytuner/engine';
 import { Store } from '@daytuner/store';
+import { TunarrClient } from '@daytuner/tunarr-client';
 import { createApp } from './app.js';
 
 const EXAMPLE = readFileSync(new URL('../../../schedules/example.yaml', import.meta.url), 'utf8');
@@ -22,7 +23,7 @@ describe('the API', () => {
     store.addChannel({
       name: 'funny', tunarrId: 'tun-1', floorMs: 7 * DAY, stepMs: DAY, schedule: EXAMPLE, state: emptyPlanState(1), edge: NOW + 8 * DAY, at: 5,
     });
-    const app = createApp({ store, clock: { now: () => NOW }, writesEnabled: false });
+    const app = createApp({ store, clock: { now: () => NOW }, client: new TunarrClient('http://tunarr.test', () => { throw new Error('no Tunarr in this test'); }) });
     get = async (path) => {
       const r = await app.request(path);
       return { status: r.status, body: await r.json() };
