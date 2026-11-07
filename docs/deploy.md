@@ -43,6 +43,17 @@ trust a plan: DayTuner appends to a channel's lineup and never changes its start
 writing on, each channel is run daily at its own time (default 03:00 in its schedule's zone; change it with
 `POST /api/channels/:name/settings`), and missed runs are made up after a restart.
 
+## Ad and filler clips
+
+DayTuner never opens a clip file. It only reads Tunarr's filler lists (their names, clip ids and lengths) over Tunarr's API and writes
+lineup items that point at those clips. **Tunarr** has to be able to play them: the folder that holds your ad and filler clips (in the
+setup this was tested against, a folder Tunarr sees as `/ads`) must be mounted into the Tunarr container, at the path its filler list
+uses. That is Tunarr's configuration, not DayTuner's, and DayTuner needs no setting for it.
+
+What it looks like when the folder is missing: the schedule and the guide are right and the programs play, but each ad break fails to
+play its clips (the timeline carries on and the next program starts on time). Clips that have no video (audio-only tracks) fail the same
+way in Tunarr's stock player. Playing the ad and filler clips of a DayTuner lineup has not been checked yet; see `docs/status.md`.
+
 ## Kubernetes
 
 [`deploy/kubernetes.example.yaml`](../deploy/kubernetes.example.yaml) has a volume, a deployment (one replica: the database has one
