@@ -139,3 +139,30 @@ describe('shows picked by id with a title label', () => {
     expect(() => parseScheduleFile(text)).not.toThrow();
   });
 });
+
+describe('chapters', () => {
+  const file = parseScheduleFile(EXAMPLE);
+  const chaptersFor = (id: string) => (id === 'mov-comedy-100' ? [{ start: 0, end: 1_800_000, type: 'chapter' as const }, { start: 1_800_000, end: 6_000_000, type: 'chapter' as const }] : []);
+
+  it('loads chapters for the programs that have them, when the schedule has mid breaks', async () => {
+    const asked: string[] = [];
+    const r = await resolveSchedule(file, { ...fakeSource(), chapters: async (id) => { asked.push(id); return chaptersFor(id); } });
+    expect(r.library.programs['mov-comedy-100']!.chapters).toHaveLength(2);
+    expect(r.library.programs['mov-comedy-90']!.chapters).toBeUndefined();
+    expect(asked.sort()).toEqual(Object.keys(r.library.programs).sort());
+    expect(r.notes).toEqual([]);
+  });
+
+  it('asks for none when the schedule has no mid breaks', async () => {
+    let calls = 0;
+    const noMid = { ...file, ads: { ...file.ads, mid: undefined } };
+    await resolveSchedule(noMid, { ...fakeSource(), chapters: async () => { calls++; return []; } });
+    expect(calls).toBe(0);
+  });
+
+  it('carries on without chapters when some cannot be read, and says so', async () => {
+    const r = await resolveSchedule(file, { ...fakeSource(), chapters: async (id) => { if (id === 'mov-comedy-100') throw new Error('boom'); return []; } });
+    expect(r.library.programs['mov-comedy-100']).toBeDefined();
+    expect(r.notes[0]).toMatch(/chapters could not be read for 1 of \d+ programs/);
+  });
+});

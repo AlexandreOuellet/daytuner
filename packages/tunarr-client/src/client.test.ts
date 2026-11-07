@@ -93,3 +93,24 @@ describe('errors', () => {
     await expect(c.channels()).rejects.toThrow(TypeError);
   });
 });
+
+describe('chapters', () => {
+  const details = (chapters: unknown) => ({ details: { streamDetails: { chapters } } });
+  it('reads markers in whole milliseconds, sorted, with unknown types as plain chapters', async () => {
+    const { fetch } = fake({
+      'GET /api/programs/p1/stream_details': details([
+        { startTime: 600000.4, endTime: 900000, chapterType: 'break' },
+        { startTime: 0, endTime: 600000.4, chapterType: 'mystery' },
+      ]),
+    });
+    const c = await new TunarrClient('http://tunarr.test', fetch).chapters('p1');
+    expect(c).toEqual([
+      { start: 0, end: 600000, type: 'chapter' },
+      { start: 600000, end: 900000, type: 'break' },
+    ]);
+  });
+  it('gives an empty list when the program has none', async () => {
+    const { fetch } = fake({ 'GET /api/programs/p2/stream_details': details([]) });
+    expect(await new TunarrClient('http://tunarr.test', fetch).chapters('p2')).toEqual([]);
+  });
+});

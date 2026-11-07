@@ -4,8 +4,8 @@
 import type { FetchLike } from './client.js';
 
 export interface FakeData {
-  shows: { id: string; title: string; episodes: { id: string; title: string; duration: number; season: number; episode: number }[] }[];
-  movies: { id: string; title: string; duration: number; genres: string[] }[];
+  shows: { id: string; title: string; episodes: { id: string; title: string; duration: number; season: number; episode: number; chapters?: { start: number; end: number; type?: string }[] }[] }[];
+  movies: { id: string; title: string; duration: number; genres: string[]; chapters?: { start: number; end: number; type?: string }[] }[];
   fillerLists: { id: string; name: string; clips: { id: string; duration: number }[] }[];
   channel: { id: string; number: number; name: string; startTime: number };
   /** Items already in the lineup (for a channel with a history). */
@@ -75,6 +75,13 @@ export class FakeTunarr {
           : d.shows.map((s) => ({ uuid: s.id, type: 'show', title: s.title }));
       const start = q.page * q.limit;
       return json({ results: all.slice(start, start + q.limit), page: q.page, totalPages: Math.max(1, Math.ceil(all.length / q.limit)), totalHits: all.length });
+    }
+    const sd = /^\/api\/programs\/([^/]+)\/stream_details$/.exec(path);
+    if (method === 'GET' && sd) {
+      const p = [...d.movies, ...d.shows.flatMap((x) => x.episodes)].find((x) => x.id === sd[1]);
+      if (!p) return json({}, 404);
+      const chapters = (p.chapters ?? []).map((c, index) => ({ index, startTime: c.start, endTime: c.end, title: `Chapter ${index + 1}`, chapterType: c.type ?? 'chapter' }));
+      return json({ details: { streamDetails: { chapters, duration: 'PT1H', audioOnly: false }, streamSource: { type: 'http', path: 'x' } } });
     }
     const desc = /^\/api\/programs\/([^/]+)\/descendants$/.exec(path);
     if (method === 'GET' && desc) {

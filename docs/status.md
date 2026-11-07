@@ -15,7 +15,7 @@ are in [`roadmap.md`](roadmap.md); verified Tunarr facts are in [`tunarr-api.md`
 | 4 Schedules and staging | not started | Needs design first |
 | 5 Web interface | not started | Needs design first |
 
-Tests: 235 pass across the engine, client, store, schedule, worker and CLI, plus 3 client integration
+Tests: 242 pass across the engine, client, store, schedule, worker and CLI, plus 3 client integration
 tests that run only against a real Tunarr (`TUNARR_URL`).
 
 ## Needed for 1.0
@@ -65,8 +65,7 @@ Settled this session and recorded under Decided in the roadmap: the exception fa
 
 Each is one of: **build** (clear what to do), **verify** (find out), **know** (accepted, worth knowing).
 
-- **build** Chapters are not loaded, so mid breaks use the every-N-minutes fallback. Tunarr only gives
-  chapters per program, in `stream_details` (one call each); load them for the programs that get scheduled.
+- **know** Chapters are loaded for every program in the schedule's pools whenever the schedule has mid breaks: one call each (about 0.4 s), 8 at a time, on every plan. A preview of 161 episodes plus the movies took under a minute. A cache in the store would remove the cost; add one if it hurts. A program whose chapters cannot be read plans with the every-N-minutes offers, with a note.
 - **know** `channel add` shows where each ordered show stands in the channel's existing lineup, and `channel adopt-history` applies it (the last item of the pool in the lineup decides, so a trailing rerun can pull the place back; `cursor set` fixes one). Only for a channel DayTuner has not written to.
 - **build** The metrics are not stored over time, which the dashboard needs.
 - **verify** Playback of ad and filler clips and the media server's guide (phase 3, above).
@@ -100,7 +99,7 @@ In this order:
 
 1. **Finish verifying phase 3.** Ad and filler clip playback (needs a test Tunarr with a configurable clip mount) and the
    media server's guide. The multi-year lineup is dropped (owner's decision).
-2. **Close the remaining small build gaps** that make the worker safe to leave running: chapters. (Done: `channel adopt-history`, `channel commits` and a note on a commit whose verification failed, `channel resync`, titles in warnings, the warning for
+2. **Close the remaining small build gaps** that make the worker safe to leave running: none left but the metrics history. (Done: chapters, `channel adopt-history`, `channel commits` and a note on a commit whose verification failed, `channel resync`, titles in warnings, the warning for
    an exception that matches no slot.)
 3. **Settle the open decisions that shape phase 4** (ad overrides, overflow, the duplicate-title
    syntax, how it is run), then design phase 4 with the owner: revisions, staging, pins and locks.

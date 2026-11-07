@@ -95,7 +95,7 @@ ffmpeg command line:
 | Filler lists | `GET /api/filler-lists`, then `GET /api/filler-lists/{id}/programs` | one entry per clip; its `duration` is fractional (for example `135732.245`) |
 | Movies, shows | `POST /api/programs/search` with a `type` filter, `page` and `limit` | movies carry `duration` and `genres`. **Pages count from 0**: page 1 skips the first `limit` results, and a `limit` at or above the total with page 1 returns nothing. Check the count against `totalHits` |
 | Episodes of a show | `GET /api/programs/{showId}/descendants` | each has `season.index` and `episodeNumber`; sort by those for the viewing order |
-| Chapters | `GET /api/programs/{id}/stream_details` | not on the other program endpoints, so one call per program |
+| Chapters | `GET /api/programs/{id}/stream_details` | not on the other program endpoints, so one call per program (about 0.4 s). They are at `details.streamDetails.chapters`: `startTime` and `endTime` in milliseconds from the start of the program, and a `chapterType`. On the test copy about half the movies had none, the rest 5 to 34, all of type `chapter` and titled "Chapter N"; the last one ends at the program's duration |
 
 Item shapes in a stored lineup: `content` has `id`, `startOffsetMs` and `duration` (the length of
 that piece); `filler` has `id` (the clip), `fillerListId`, `fillerType` and `duration`; `flex` has

@@ -2,7 +2,7 @@
 // list names become clip lists. The result is exactly what the engine's plan() takes.
 // The source is anything shaped like the Tunarr client, so tests can use a fake one.
 
-import type { AdPosition, Library, Pool, Schedule, SlotDef } from '@daytuner/engine';
+import type { AdPosition, Chapter, Library, Pool, Schedule, SlotDef } from '@daytuner/engine';
 import { DAY_NAMES, type ScheduleFile } from './file.js';
 import { matchesFilter } from './units.js';
 
@@ -12,7 +12,12 @@ export interface LibrarySource {
   episodes(showId: string): Promise<{ id: string; title: string; duration: number; season: number; episode: number }[]>;
   fillerLists(): Promise<{ id: string; name: string }[]>;
   fillerListClips(listId: string): Promise<{ id: string; duration: number }[]>;
+  /** Chapter markers of one program. Optional: a source without it plans with the every-N-minutes offers. */
+  chapters?(programId: string): Promise<{ start: number; end: number; type: Chapter['type'] }[]>;
 }
+
+/** How many chapter requests run at once. Each takes about 0.4 s in Tunarr. */
+const CHAPTER_CONCURRENCY = 8;
 
 export interface Resolved {
   schedule: Schedule;
@@ -143,6 +148,26 @@ export async function resolveSchedule(file: ScheduleFile, source: LibrarySource)
     }
     if (typeof e.counts === 'string' && !(e.counts in pools)) throw new ResolveError(`exception counts against an unknown pool "${e.counts}"`);
     exceptions.push({ on: e.on, at: e.at, programId, ...(e.counts !== undefined ? { counts: e.counts } : {}) });
+  }
+
+  // Chapters, for the programs a mid break could split. Without mid breaks nothing needs them.
+  if (file.ads.mid && source.chapters) {
+    const ids = Object.keys(programs);
+    let next = 0;
+    let failed = 0;
+    const worker = async (): Promise<void> => {
+      while (next < ids.length) {
+        const id = ids[next++]!;
+        try {
+          const chapters = await source.chapters!(id);
+          if (chapters.length > 0) programs[id] = { ...programs[id]!, chapters };
+        } catch {
+          failed++;
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(CHAPTER_CONCURRENCY, ids.length) }, worker));
+    if (failed > 0) notes.push(`chapters could not be read for ${failed} of ${ids.length} programs; they use the every-N-minutes offers`);
   }
 
   // The week.

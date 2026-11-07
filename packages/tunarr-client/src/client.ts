@@ -9,6 +9,15 @@ export type FetchLike = (url: string, init?: { method?: string; headers?: Record
   text(): Promise<string>;
 }>;
 
+const CHAPTER_TYPES = ['chapter', 'intro', 'outro', 'break', 'recap'] as const;
+
+/** A chapter marker, in whole milliseconds from the start of the program. */
+export interface ChapterInfo {
+  start: number;
+  end: number;
+  type: (typeof CHAPTER_TYPES)[number];
+}
+
 export class TunarrError extends Error {
   constructor(readonly status: number, readonly url: string, body: string) {
     super(`Tunarr answered ${status} for ${url}: ${body.slice(0, 300)}`);
@@ -197,6 +206,23 @@ export class TunarrClient {
   }
 
   /** All the episodes of a show, in the order a viewer would watch them: by season, then episode. */
+  /**
+   * The chapter markers of one program, earliest first, or an empty list when it has none. Tunarr only
+   * gives them in a program's stream details, one call per program (about 0.4 s each). A marker of a
+   * type DayTuner does not know counts as a plain chapter.
+   */
+  async chapters(programId: string): Promise<ChapterInfo[]> {
+    const d = rec(await this.get(`/api/programs/${programId}/stream_details`), 'stream details');
+    const sd = rec(rec(d['details'], 'details')['streamDetails'], 'streamDetails');
+    return arr(sd['chapters'] ?? [], 'chapters')
+      .map((c) => {
+        const o = rec(c, 'chapter');
+        const type = CHAPTER_TYPES.find((t) => t === o['chapterType']) ?? 'chapter';
+        return { start: Math.round(num(o['startTime'], 'chapter start')), end: Math.round(num(o['endTime'], 'chapter end')), type };
+      })
+      .sort((a, b) => a.start - b.start);
+  }
+
   async episodes(showId: string): Promise<EpisodeInfo[]> {
     const items = arr(await this.get(`/api/programs/${showId}/descendants`), 'episodes').map((i) => rec(i, 'episode'));
     const out: EpisodeInfo[] = [];
