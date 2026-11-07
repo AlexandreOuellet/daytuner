@@ -23,9 +23,10 @@ tests that run only against a real Tunarr (`TUNARR_URL`).
 Nothing is pushed publicly until all of this is done (see the roadmap).
 
 **Phase 3, to finish**
-- [ ] Real playback of a lineup DayTuner wrote, watched while the wall clock is inside it. Needs a
-      throwaway channel in the test copy with its start in the past, and a pod that mounts `/ads` to
-      play the ad clips. The split-program offsets are confirmed from Tunarr's code and tests only
+- [x] Playback of programs in a lineup DayTuner wrote: right media, seek and remaining time to within
+      44 ms across a split program (see `tunarr-api.md`)
+- [ ] Playback of the ad and filler clips: needs a pod that mounts `/ads` (video files); the test
+      library's other filler list is audio-only tracks, which the stock player cannot remux
 - [x] Tunarr's XMLTV guide after an append: programme starts exactly on the grid, contiguous
 - [ ] The media server's guide (Jellyfin reading Tunarr's XMLTV) after an append
 - [ ] How a synthetic multi-year lineup behaves (memory, startup time, `now_playing`)
@@ -76,7 +77,7 @@ Each is one of: **build** (clear what to do), **verify** (find out), **know** (a
 - **build** Adding a channel starts from a fresh state: an existing channel's place in its shows is not
   read from its history, so ordered shows begin at episode 1 unless adjusted with `cursor set`.
 - **build** The metrics are not stored over time, which the dashboard needs.
-- **verify** Observed playback of a DayTuner-written region, the media server's guide, and a multi-year lineup (phase 3, above).
+- **verify** Playback of ad and filler clips, the media server's guide, and a multi-year lineup (phase 3, above).
 - **know** A lineup whose end is fractional (older lineups) gets one rounded flex to the next grid
   line, so it stays up to half a millisecond off the grid from there on.
 - **know** `channel resync` adopts Tunarr's real end after a refusal, but then the planner state may not match what is in the lineup; a person has to check the shows' places.
@@ -105,8 +106,8 @@ exception fallback and the mid-break offers are under Open decisions above.)
 
 In this order:
 
-1. **Finish verifying phase 3.** Playback and guides, then a multi-year lineup. These need the media
-   server, and the multi-year lineup adds tens of megabytes to the shared test pod, so agree first.
+1. **Finish verifying phase 3.** Ad and filler clip playback (needs a pod that mounts `/ads`), the
+   media server's guide, then a multi-year lineup (adds tens of megabytes to the test pod).
 2. **Close the remaining small build gaps** that make the worker safe to leave running: a way to
    inspect a commit that was pending after a verified append did not match, chapters, and reading an
    existing channel's place in its shows. (Done: `channel resync`, titles in warnings, the warning for

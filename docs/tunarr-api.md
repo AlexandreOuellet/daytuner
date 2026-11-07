@@ -61,12 +61,30 @@ copy, on top of a lineup whose end carried a fraction of a millisecond. Checked 
 - **Split programs.** A `content` item's `startOffsetMs` is the offset into the source media where
   that piece begins. Tunarr's own test (`StreamProgramCalculator.test.ts`, "mid-roll break") covers
   exactly this: 8 minutes at offset 0, a break, then 14 minutes at offset 8 minutes. The stock
-  scheduler writes `baseOffset + segmentStart`, the same shape DayTuner writes. Verified by reading
-  the code, not yet by watching a playback of a DayTuner-written region.
+  scheduler writes `baseOffset + segmentStart`, the same shape DayTuner writes. Also observed (next
+  section).
 - **Ad clips cannot be played from the `tunarr-stock-test` pod.** The "ads" source is local files under
   `/ads`, which that pod does not mount (a Tunarr with that folder mounted does). Tunarr's log shows `Error opening input: No such file or directory`.
 - Playing a DayTuner-written region needs the wall clock to be inside it: a throwaway channel in the
   test copy whose start is in the past, with the plan appended from its start.
+
+### Observed playback of a DayTuner-written lineup
+
+On a throwaway channel in the test copy (created with `POST /api/channels`, body
+`{"type": "new", "channel": {...}}` with a client-supplied `id`, `duration: 0` and a `startTime` on the
+grid in the past; deleted afterwards), a 4-hour plan was appended from the channel's very first
+moment. While the wall clock ran through it, 15 samples asked the pod to stream and read its real
+ffmpeg command line:
+
+- **Every content piece (8 samples, across pieces 3 and 4 of one episode, either side of a break)
+  played the right Jellyfin media, seeking to `startOffsetMs` plus the time elapsed in the piece, with
+  the right time remaining, to within 44 ms.** The piece after a break resumed at exactly its
+  `startOffsetMs`. So a program split at its mid breaks is played continuously.
+- **Filler items (7 samples) were not playable in that pod, for reasons of the pod and the library:**
+  the clips used (the "Funny Filler" list) are audio-only music tracks, and the stock remux path fails
+  with `Stream map '' matches no streams`, after which Tunarr falls back to an error screen that wants a
+  GPU the pod lacks. The "Old Ads" clips are video files under `/ads`, which the pod does not mount.
+  The timeline itself was unaffected: the next content piece started on time.
 
 ## The read path (verified on the test copy)
 
