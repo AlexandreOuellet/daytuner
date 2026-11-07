@@ -235,3 +235,41 @@ describe('schedule revisions', () => {
     }
   });
 });
+
+describe('staged slots', () => {
+  let store: Store;
+  let id: number;
+  beforeEach(() => {
+    store = Store.open(':memory:');
+    id = store.addChannel(channel({ edge: 1000 })).id;
+  });
+  afterEach(() => store.close());
+  const slot = (start: number, end: number) => ({
+    slotId: '1@72000000', start, end, pool: 'movies', programs: ['m1'], blocks: [], exception: false, items: [],
+  });
+
+  it('stores slots and returns them in order, inside a range', () => {
+    store.replaceStaged('funny', 1000, 9000, [slot(5000, 6000), slot(2000, 3000)], 7);
+    expect(store.stagedSlots(id).map((s) => [s.start, s.end, s.locked, s.pins])).toEqual([[2000, 3000, false, {}], [5000, 6000, false, {}]]);
+    expect(store.stagedSlots(id, 4000, 9000)).toHaveLength(1);
+    expect(store.stagedSlots(id)[0]!.planned.programs).toEqual(['m1']);
+  });
+
+  it('replaces what was staged in the range and leaves the rest', () => {
+    store.replaceStaged('funny', 1000, 9000, [slot(2000, 3000), slot(5000, 6000)], 1);
+    store.replaceStaged('funny', 4000, 9000, [slot(5000, 7000)], 2);
+    expect(store.stagedSlots(id).map((s) => [s.start, s.end])).toEqual([[2000, 3000], [5000, 7000]]);
+  });
+
+  it('refuses a slot before the committed edge', () => {
+    expect(() => store.replaceStaged('funny', 0, 9000, [slot(500, 900)], 1)).toThrow(/at or after the end/);
+    expect(store.stagedSlots(id)).toHaveLength(0);
+  });
+
+  it('clears a range, or everything, and says how many', () => {
+    store.replaceStaged('funny', 1000, 9000, [slot(2000, 3000), slot(5000, 6000)], 1);
+    expect(store.clearStaged('funny', 4000, 9000)).toBe(1);
+    expect(store.clearStaged('funny')).toBe(1);
+    expect(() => store.clearStaged('ghost')).toThrow(/no channel/);
+  });
+});

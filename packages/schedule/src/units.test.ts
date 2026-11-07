@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { matchesFilter, parseDuration, parseDurationFilter, parseMonthDay, parsePercent, parseRange, parseTimeOfDay } from './units.js';
+import { matchesFilter, parseDuration, parseDurationFilter, parseMonthDay, parsePercent, parseRange, parseTimeOfDay, parseLocalDateTime } from './units.js';
 
 describe('units', () => {
   it('reads durations', () => {
@@ -31,5 +31,19 @@ describe('units', () => {
     expect(parseMonthDay('10-31')).toEqual({ month: 10, day: 31 });
     expect(parseMonthDay('2026-10-31')).toEqual({ month: 10, day: 31, year: 2026 });
     expect(() => parseMonthDay('13-40')).toThrow();
+  });
+});
+
+describe('parseLocalDateTime', () => {
+  it('reads a date as local midnight and a date-time as that local time', () => {
+    // Toronto is UTC-4 on 31 October 2026 and UTC-5 on 1 November after the clocks go back.
+    expect(parseLocalDateTime('America/Toronto', '2026-10-31')).toBe(Date.UTC(2026, 9, 31, 4));
+    expect(parseLocalDateTime('America/Toronto', '2026-10-31T20:00')).toBe(Date.UTC(2026, 10, 1, 0));
+    expect(parseLocalDateTime('America/Toronto', '2026-11-02')).toBe(Date.UTC(2026, 10, 2, 5));
+  });
+  it('rejects text that is not a date, and dates that do not exist', () => {
+    expect(() => parseLocalDateTime('America/Toronto', 'Halloween')).toThrow(/not a date/);
+    expect(() => parseLocalDateTime('America/Toronto', '2026-02-30')).toThrow(/not a real date/);
+    expect(() => parseLocalDateTime('America/Toronto', '2026-10-31T25:00')).toThrow(/not a real date/);
   });
 });

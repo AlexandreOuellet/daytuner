@@ -1,3 +1,5 @@
+import { toEpoch } from '@daytuner/engine';
+
 // Parsing the small units a schedule file uses: durations, ranges, percentages, times of day.
 // Every parser returns whole milliseconds (or a plain fraction for a percentage) or throws a
 // message that says what was wrong.
@@ -86,4 +88,20 @@ export function parseMonthDay(text: string): MonthDay {
   const day = Number(m[3]);
   if (month < 1 || month > 12 || day < 1 || day > 31) throw new Error(`"${text}" is not a real date`);
   return { month, day, ...(m[1] ? { year: Number(m[1]) } : {}) };
+}
+
+/**
+ * A local date or date and time in `zone`: "2026-10-31" is that day at midnight, "2026-10-31T20:00" an
+ * exact local time. Returns the instant. Rejects anything else, and dates that do not exist.
+ */
+export function parseLocalDateTime(zone: string, text: string): number {
+  const m = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}))?$/.exec(text.trim());
+  if (!m) throw new Error(`"${text}" is not a date (use 2026-10-31 or 2026-10-31T20:00, in the channel's time zone)`);
+  const [year, month, day] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const [hour, minute] = [Number(m[4] ?? 0), Number(m[5] ?? 0)];
+  const probe = new Date(Date.UTC(year, month - 1, day));
+  if (probe.getUTCFullYear() !== year || probe.getUTCMonth() !== month - 1 || probe.getUTCDate() !== day || hour > 23 || minute > 59) {
+    throw new Error(`"${text}" is not a real date`);
+  }
+  return toEpoch(zone, { year, month, day, hour, minute });
 }

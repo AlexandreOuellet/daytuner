@@ -80,7 +80,7 @@ daytuner stage <channel> clear [--from DATE --to DATE]
 
 ## Slices, in order
 
-1. **Store and read-only staging.** The table, `stage generate` (plan a range on a copy of the state, keep
+1. **Store and read-only staging (built).** The table, `stage generate` (plan a range on a copy of the state, keep
    a part), `stage show`, `stage clear`. The worker ignores staging. Tests on the store and generate.
 2. **Locks.** Engine: staged windows, lock replay with the state effect, the validity check. Worker uses
    staged slots. `stage lock`, `unlock`. Tests: a locked slot is committed exactly as stored; the state

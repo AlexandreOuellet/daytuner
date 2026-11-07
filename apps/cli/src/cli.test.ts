@@ -199,6 +199,27 @@ describe('the command line', () => {
     expect(await run('channel', 'rollback', 'Test', '7')).not.toBe(0);
   });
 
+  it('stages a range, shows it, and clears it, without writing to Tunarr', async () => {
+    await run('channel', 'add', join(dir, 'test.yaml'));
+    const before = fake.lineup.length;
+    out.length = 0;
+    expect(await run('stage', 'Test', 'generate', '--to', '2026-11-20', '--keep', '2026-11-18..2026-11-20')).toBe(0);
+    expect(said()).toMatch(/Staged \d+ slot/);
+    out.length = 0;
+    expect(await run('stage', 'Test', 'show')).toBe(0);
+    expect(said()).toMatch(/2026-11-1[89] \d\d:\d\d to 2026-11-\d\d \d\d:\d\d/);
+    expect(said()).not.toContain('Nothing is staged');
+    expect(fake.lineup).toHaveLength(before);
+    out.length = 0;
+    expect(await run('stage', 'Test', 'clear')).toBe(0);
+    expect(said()).toMatch(/Cleared \d+ staged slot/);
+    out.length = 0;
+    await run('stage', 'Test', 'show');
+    expect(said()).toContain('Nothing is staged');
+    expect(await run('stage', 'Test', 'generate')).not.toBe(0);
+    expect(await run('stage', 'Test', 'generate', '--to', 'soon')).not.toBe(0);
+  });
+
   it('previews without a store', async () => {
     expect(await run('preview', join(dir, 'test.yaml'), '--days', '2', '--from', '2026-11-09T00:00:00Z')).toBe(0);
     expect(said()).toContain('grid accuracy');

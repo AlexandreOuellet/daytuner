@@ -217,6 +217,42 @@ export async function resync(deps: WorkerDeps, channelName: string, opts: { dryR
   return report;
 }
 
+export interface StageResult {
+  /** The slots now staged (the kept part of what was planned). */
+  kept: PlannedSlot[];
+  /** How many slots were planned in all, including those before the kept range that only move the state. */
+  planned: number;
+  warnings: PlanWarning[];
+  /** Readable names for the programs, for showing the slots. */
+  titles: Record<string, string>;
+}
+
+/**
+ * Plans from the end of the committed lineup up to `to` on a copy of the state, and stages only the slots
+ * that start inside `[keepFrom, keepTo)`. The days before the kept range are planned only so the shows'
+ * places and the bags are right where the kept range begins; they are not stored and are generated normally
+ * later. The channel's own state does not change. Replaces the staged slots in the kept range.
+ */
+export async function stageGenerate(
+  deps: Pick<WorkerDeps, 'store' | 'client' | 'clock'>,
+  channelName: string,
+  range: { to: number; keepFrom?: number; keepTo?: number },
+): Promise<StageResult> {
+  const { store, client, clock } = deps;
+  const ch = store.channel(channelName);
+  if (!ch) throw new ConsistencyError(`no channel named "${channelName}" in the store`);
+  const { schedule, library, titles } = await resolveSchedule(parseScheduleFile(ch.schedule), client);
+  const { from } = alignToGrid(ch.edge, schedule.grid);
+  const keepFrom = range.keepFrom ?? from;
+  const keepTo = range.keepTo ?? range.to;
+  if (!(range.to > from)) throw new ConsistencyError('the end of the range is not after the end of the committed lineup');
+  if (!(keepTo > keepFrom) || keepFrom < from || keepTo > range.to) throw new ConsistencyError('the part to keep must lie inside the range, after the committed lineup');
+  const result = plan({ schedule, library, state: ch.state, from, to: range.to });
+  const kept = result.slots.filter((s) => s.start >= keepFrom && s.start < keepTo);
+  store.replaceStaged(channelName, keepFrom, keepTo, kept, clock.now());
+  return { kept, planned: result.slots.length, warnings: result.warnings.filter((w) => w.at >= keepFrom && w.at < keepTo), titles };
+}
+
 export interface SequenceInfo {
   /** The key the store uses for this ordered pool's place. */
   key: string;

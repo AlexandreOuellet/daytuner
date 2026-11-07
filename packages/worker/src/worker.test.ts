@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { emptyPlanState } from '@daytuner/engine';
 import { Store } from '@daytuner/store';
 import { FakeTunarr, TunarrClient } from '@daytuner/tunarr-client';
-import { adjustCursor, adoptHistory, ConsistencyError, listSequences, resync, topUp, type WorkerDeps } from './worker.js';
+import { adjustCursor, adoptHistory, stageGenerate, ConsistencyError, listSequences, resync, topUp, type WorkerDeps } from './worker.js';
 
 const DAY = 86_400_000;
 const MIN = 60_000;
@@ -309,6 +309,58 @@ describe('adopting the places of shows from an existing lineup', () => {
     const s = setup();
     await topUp(s.deps, 'Test');
     await expect(adoptHistory(s.deps, 'Test')).rejects.toThrow(/already written/);
+  });
+});
+
+describe('staging a range', () => {
+  const at = (days: number, hours = 0) => NOW0 + days * DAY + hours * 3_600_000;
+
+  it('plans from the committed edge but stores only the kept part, and leaves the state alone', async () => {
+    const s = setup(); // the lineup ends 3 days after NOW0
+    const stateBefore = JSON.stringify(s.store.channel('Test')!.state);
+    const r = await stageGenerate(s.deps, 'Test', { to: at(8), keepFrom: at(6), keepTo: at(7) });
+    expect(r.planned).toBeGreaterThan(r.kept.length);
+    expect(r.kept.length).toBeGreaterThan(0);
+    const staged = s.store.stagedSlots(s.store.channel('Test')!.id);
+    expect(staged.map((x) => x.start)).toEqual(r.kept.map((x) => x.start));
+    expect(staged.every((x) => x.start >= at(6) && x.start < at(7))).toBe(true);
+    expect(JSON.stringify(s.store.channel('Test')!.state)).toBe(stateBefore);
+    expect(s.fake.requests.some((q) => q.startsWith('POST') && q.includes('/programming'))).toBe(false);
+    expect(r.titles[staged[0]!.planned.programs[0]!]).toBeTruthy();
+  });
+
+  it('keeps the whole range by default, and replaces a range staged earlier', async () => {
+    const s = setup();
+    await stageGenerate(s.deps, 'Test', { to: at(5) });
+    const first = s.store.stagedSlots(s.store.channel('Test')!.id);
+    expect(first[0]!.start).toBeGreaterThanOrEqual(at(3));
+    await stageGenerate(s.deps, 'Test', { to: at(5) });
+    expect(s.store.stagedSlots(s.store.channel('Test')!.id)).toHaveLength(first.length);
+  });
+
+  it('is deterministic: staging the same range twice gives the same slots', async () => {
+    const s = setup();
+    await stageGenerate(s.deps, 'Test', { to: at(6) });
+    const a = JSON.stringify(s.store.stagedSlots(s.store.channel('Test')!.id).map((x) => x.planned));
+    await stageGenerate(s.deps, 'Test', { to: at(6) });
+    expect(JSON.stringify(s.store.stagedSlots(s.store.channel('Test')!.id).map((x) => x.planned))).toBe(a);
+  });
+
+  it('rejects a range that ends before the lineup does, or a kept part outside it', async () => {
+    const s = setup();
+    await expect(stageGenerate(s.deps, 'Test', { to: at(1) })).rejects.toThrow(/not after the end/);
+    await expect(stageGenerate(s.deps, 'Test', { to: at(8), keepFrom: at(2), keepTo: at(5) })).rejects.toThrow(/must lie inside/);
+    await expect(stageGenerate(s.deps, 'Test', { to: at(8), keepFrom: at(6), keepTo: at(9) })).rejects.toThrow(/must lie inside/);
+  });
+
+  it('does not change what the worker commits', async () => {
+    const a = setup();
+    const b = setup();
+    await stageGenerate(b.deps, 'Test', { to: NOW0 + 9 * DAY });
+    const ra = await topUp(a.deps, 'Test');
+    const rb = await topUp(b.deps, 'Test');
+    expect(rb.items).toBe(ra.items);
+    expect(b.fake.lineup).toEqual(a.fake.lineup);
   });
 });
 

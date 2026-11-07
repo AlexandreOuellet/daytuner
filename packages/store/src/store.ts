@@ -3,7 +3,7 @@
 // the store never reads the clock.
 
 import { DatabaseSync } from 'node:sqlite';
-import type { PlanState } from '@daytuner/engine';
+import type { PlannedSlot, PlanState } from '@daytuner/engine';
 
 export interface ChannelRecord {
   id: number;
@@ -41,6 +41,23 @@ export interface RevisionRecord {
   number: number;
   yaml: string;
   savedAt: number;
+}
+
+/** A planned slot kept ahead of the committed edge, to look at, edit and lock before it is committed. */
+export interface StagedSlotRecord {
+  channelId: number;
+  /** Where its window starts (the key, with the channel). */
+  start: number;
+  end: number;
+  /** The week slot it came from (`day@time`), or none for a slot added by hand. */
+  slotId: string | null;
+  pool: string | null;
+  /** Block number (1 is the first) to a program id. */
+  pins: Record<number, string>;
+  locked: boolean;
+  /** The slot as last generated: its blocks and items. */
+  planned: PlannedSlot;
+  generatedAt: number;
 }
 
 export type CommitStatus = 'pending' | 'done' | 'abandoned';
@@ -142,6 +159,18 @@ create table if not exists adjustments (
   position_before integer not null,
   position_after integer not null,
   history_after integer not null
+);
+create table if not exists staged_slots (
+  channel_id integer not null references channels(id),
+  start real not null,
+  end real not null,
+  slot_id text,
+  pool text,
+  pins text not null default '{}',
+  locked integer not null default 0,
+  planned text not null,
+  generated_at integer not null,
+  primary key (channel_id, start)
 );
 create index if not exists commits_by_channel on commits(channel_id, id);
 -- At most one pending commit per channel: a second one would mean two writers.
@@ -366,6 +395,51 @@ export class Store {
           positionAfter: Number(o['position_after']), historyAfter: Number(o['history_after']),
         };
       });
+  }
+
+  /**
+   * Stores generated slots as staged slots, replacing the staged slots that start inside `[from, to)`.
+   * Refuses when a locked slot is in that range, or a slot starts before the committed edge: staging only
+   * lives after it.
+   */
+  replaceStaged(name: string, from: number, to: number, slots: readonly PlannedSlot[], at: number): void {
+    this.tx(() => {
+      const ch = this.channel(name);
+      if (!ch) throw new StoreError(`no channel named "${name}"`);
+      const locked = this.db
+        .prepare('select start from staged_slots where channel_id = ? and start >= ? and start < ? and locked = 1')
+        .all(ch.id, from, to) as { start: number }[];
+      if (locked.length > 0) throw new StoreError(`${locked.length} locked staged slot(s) are in that range; unlock them first`);
+      for (const sl of slots) {
+        if (sl.start < ch.edge) throw new StoreError('staged slots must start at or after the end of the committed lineup');
+      }
+      this.db.prepare('delete from staged_slots where channel_id = ? and start >= ? and start < ?').run(ch.id, from, to);
+      const ins = this.db.prepare('insert into staged_slots (channel_id, start, end, slot_id, pool, pins, locked, planned, generated_at) values (?, ?, ?, ?, ?, ?, 0, ?, ?)');
+      for (const sl of slots) ins.run(ch.id, sl.start, sl.end, sl.slotId, sl.pool, '{}', JSON.stringify(sl), at);
+    });
+  }
+
+  /** Staged slots of a channel that start inside `[from, to)` (all of them when no range is given), earliest first. */
+  stagedSlots(channelId: number, from = Number.MIN_SAFE_INTEGER, to = Number.MAX_SAFE_INTEGER): StagedSlotRecord[] {
+    return this.db
+      .prepare('select * from staged_slots where channel_id = ? and start >= ? and start < ? order by start')
+      .all(channelId, from, to)
+      .map((r) => {
+        const o = r as Row;
+        return {
+          channelId, start: Number(o['start']), end: Number(o['end']),
+          slotId: o['slot_id'] === null ? null : String(o['slot_id']), pool: o['pool'] === null ? null : String(o['pool']),
+          pins: JSON.parse(String(o['pins'])) as Record<number, string>, locked: Number(o['locked']) === 1,
+          planned: JSON.parse(String(o['planned'])) as PlannedSlot, generatedAt: Number(o['generated_at']),
+        };
+      });
+  }
+
+  /** Removes staged slots that start inside `[from, to)`, locked ones too. Returns how many. */
+  clearStaged(name: string, from = Number.MIN_SAFE_INTEGER, to = Number.MAX_SAFE_INTEGER): number {
+    const ch = this.channel(name);
+    if (!ch) throw new StoreError(`no channel named "${name}"`);
+    return Number(this.db.prepare('delete from staged_slots where channel_id = ? and start >= ? and start < ?').run(ch.id, from, to).changes);
   }
 
   commits(channelId: number, limit = 50): CommitRecord[] {

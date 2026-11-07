@@ -17,10 +17,10 @@ import { dirname } from 'node:path';
 import { parseArgs } from 'node:util';
 import { alignToGrid, TunarrClient, type FetchLike } from '@daytuner/tunarr-client';
 import { ceilToGrid, computeMetrics, DAY, emptyPlanState, plan, type Clock } from '@daytuner/engine';
-import { diffLines, formatDiff, parseDuration, parseScheduleFile, resolveSchedule } from '@daytuner/schedule';
+import { diffLines, formatDiff, parseDuration, parseLocalDateTime, parseScheduleFile, resolveSchedule } from '@daytuner/schedule';
 import { Store } from '@daytuner/store';
-import { adjustCursor, adoptHistory, ConsistencyError, listSequences, placesFromLineup, resync, topUp } from '@daytuner/worker';
-import { formatMetrics, formatWarnings, inZone } from './format.js';
+import { adjustCursor, adoptHistory, ConsistencyError, listSequences, placesFromLineup, resync, stageGenerate, topUp } from '@daytuner/worker';
+import { formatMetrics, formatWarnings, inZone, slotLabel } from './format.js';
 
 export interface CliEnv {
   clock: Clock;
@@ -37,6 +37,8 @@ const USAGE = `Usage:
   daytuner channel set-schedule <name> <channel.yaml>      (saves a new revision)
   daytuner channel revisions <name> | diff <name> [from [to]] | rollback <name> <number>
   daytuner channel list | status <name> | commits <name> | adopt-history <name> [--yes] | resync <name> [--yes]
+  daytuner stage <name> generate --to DATE [--keep DATE..DATE] | show [--from DATE] [--to DATE] | clear [--from DATE] [--to DATE]
+                                        (dates are local to the channel: 2026-10-31 or 2026-10-31T20:00)
   daytuner run <name> [--yes]            (a dry run without --yes)
   daytuner cursor <name> list | rewind <sequence> <k> | set <sequence> <episode-number>
 Common: --tunarr URL (or TUNARR_URL)  --db FILE (or DAYTUNER_DB, default state/daytuner.db)`;
@@ -51,6 +53,7 @@ export async function runCli(argv: string[], io: CliEnv): Promise<number> {
     options: {
       tunarr: { type: 'string' }, db: { type: 'string' }, channel: { type: 'string' }, from: { type: 'string' },
       days: { type: 'string', default: '7' }, seed: { type: 'string', default: '1' },
+      to: { type: 'string' }, keep: { type: 'string' },
       floor: { type: 'string', default: '7d' }, step: { type: 'string', default: '24h' }, yes: { type: 'boolean', default: false },
     },
   });
@@ -247,6 +250,43 @@ export async function runCli(argv: string[], io: CliEnv): Promise<number> {
       }
       store.close();
       return 0;
+    }
+
+    if (command === 'stage' && rest[0] && rest[1]) {
+      const [name, sub] = rest;
+      const store = openStore();
+      const ch = store.channel(name!);
+      if (!ch) throw new Error(`no channel named "${name}"`);
+      const zone = parseScheduleFile(ch.schedule).timezone;
+      const date = (t: string | undefined): number | undefined => (t === undefined ? undefined : parseLocalDateTime(zone, t));
+      if (sub === 'generate') {
+        const to = date(values.to);
+        if (to === undefined) throw new Error('give the end of the range with --to DATE');
+        const [kf, kt] = values.keep === undefined ? [undefined, undefined] : values.keep.split('..');
+        if (values.keep !== undefined && (kf === undefined || kt === undefined)) throw new Error('--keep takes two dates: DATE..DATE');
+        const r = await stageGenerate({ store, client: reader(), clock: io.clock }, name!, {
+          to, ...(kf !== undefined ? { keepFrom: date(kf)! } : {}), ...(kt !== undefined ? { keepTo: date(kt)! } : {}),
+        });
+        io.out(`Staged ${r.kept.length} slot(s) (planned ${r.planned} from the end of the committed lineup, kept the part you asked for). Nothing was written to Tunarr, and the channel's state did not change.`);
+        io.out(`\n${formatWarnings(r.warnings, zone, r.titles)}`);
+        store.close();
+        return 0;
+      }
+      if (sub === 'show') {
+        const slots = store.stagedSlots(ch.id, date(values.from), date(values.to));
+        if (slots.length === 0) io.out('Nothing is staged.');
+        for (const s of slots) {
+          io.out(`${inZone(s.start, zone)} to ${inZone(s.end, zone)}  ${s.slotId ? slotLabel(s.slotId) : 'added'} ${s.pool ?? ''}${s.locked ? '  [locked]' : ''}  ${s.planned.programs.length} program(s)`);
+        }
+        store.close();
+        return 0;
+      }
+      if (sub === 'clear') {
+        const n = store.clearStaged(name!, date(values.from), date(values.to));
+        io.out(`Cleared ${n} staged slot(s).`);
+        store.close();
+        return 0;
+      }
     }
 
     if (command === 'cursor' && rest[0] && rest[1]) {
