@@ -44,7 +44,7 @@ Nothing is pushed publicly until all of this is done (see the roadmap).
 - [ ] Edit schedules, preview, see what is scheduled, link to the channel in Tunarr (the schedule designer is designed in `web-schedule.md`: week grid, drag and type, a Pools panel, a calendar of special days; not built)
 - [ ] Stage a date range, edit a day in staging (delete, add, resize slots, pin programs), re-plan only what changed (designed in `web-staging.md`: a day timeline, edits on the blocks with a search panel, reset a slot or a day; not built)
 - [ ] Cursor adjustments with a preview of which airing they change (designed in `web-cursors.md`: a card per show, missed a week / rewind / set an episode, a before and after preview; not built)
-- [ ] Metrics dashboard: the numbers in [`metrics.md`](metrics.md) per channel and over time (the metrics
+- [ ] Metrics dashboard: the numbers in [`metrics.md`](metrics.md) per channel and over time (designed in `web-dashboard.md`: a health card per channel, one point per commit, targets with defaults; the metrics
       are computed today but not stored over time)
 
 **Release**
@@ -58,7 +58,7 @@ Settled this session and recorded under Decided in the roadmap: the exception fa
 
 - **Ad and bumper interface.** Decided: a block drawn in order, a live sample from the real library, simple first with details on request, saved as a new schedule revision. See [`web-ads.md`](web-ads.md). Open there: warning about unplayable clips, which lists to offer, where the interstitial sits in the picture.
 - **Mid-break offers** need refinement, deferred by the owner until later.
-- **Web pages still to design with the owner:** the dashboard (the ads page, the cursors page, the staging editor, the schedule designer's main view and the architecture are done).
+- **Web pages designed:** all five (the ads page, the cursors page, the staging editor, the schedule designer's main view and the architecture are done).
 - **Phase 4 design.** The staging build plan is in [`staging-design.md`](staging-design.md) (six slices; pins by block number, a lock applies its state effect, ranges in local dates). Storage, conflicts, revisions and the revision-versus-locks rule are decided (see
   `architecture.md`, "Phase 4 storage"). Still to settle when building: how staging is shown in the CLI, and the
   exact preview diff format.
@@ -69,7 +69,7 @@ Each is one of: **build** (clear what to do), **verify** (find out), **know** (a
 
 - **know** Chapters are cached in the store (`chapter_cache`), keyed by program id: a cached list is used while the program's length is unchanged and it is under 30 days old, and "has none" is cached too. On the test copy a staging command took 50 s the first time and 7 s after. `daytuner chapters clear` forgets them, for example after the library is scanned again. A program whose chapters cannot be read plans with the every-N-minutes offers, with a note, and is not cached.
 - **know** `channel add` shows where each ordered show stands in the channel's existing lineup, and `channel adopt-history` applies it (the last item of the pool in the lineup decides, so a trailing rerun can pull the place back; `cursor set` fixes one). Only for a channel DayTuner has not written to.
-- **build** The metrics are not stored over time, which the dashboard needs.
+- **build** The metrics are not stored over time, which the dashboard needs (storage designed in `web-dashboard.md`: a `commit_metrics` row per commit, and targets per channel).
 - **verify** Playback of ad and filler clips and the media server's guide (phase 3, above).
 - **know** A lineup whose end is fractional (older lineups) gets one rounded flex to the next grid
   line, so it stays up to half a millisecond off the grid from there on.
