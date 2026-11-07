@@ -19,7 +19,7 @@ import { alignToGrid, TunarrClient, type FetchLike } from '@daytuner/tunarr-clie
 import { ceilToGrid, computeMetrics, DAY, emptyPlanState, plan, type Clock } from '@daytuner/engine';
 import { addIds, diffLines, findProgram, formatDiff, parseDuration, parseLocalDateTime, parseScheduleFile, resolveSchedule } from '@daytuner/schedule';
 import { Store } from '@daytuner/store';
-import { adjustCursor, adoptHistory, ConsistencyError, listSequences, placesFromLineup, resync, revisionImpact, stageCheck, stageDiff, stageEdit, stageGenerate, stageRefresh, topUp } from '@daytuner/worker';
+import { adjustCursor, adoptHistory, cachedSource, ConsistencyError, listSequences, placesFromLineup, resync, revisionImpact, stageCheck, stageDiff, stageEdit, stageGenerate, stageRefresh, topUp } from '@daytuner/worker';
 import { formatChanges, formatMetrics, formatWarnings, inZone, slotLabel } from './format.js';
 
 export interface CliEnv {
@@ -42,6 +42,7 @@ const USAGE = `Usage:
                    | pin DATETIME BLOCK movie:TITLE | pin DATETIME BLOCK episode:SHOW/TITLE | unpin DATETIME BLOCK
                    | delete DATETIME | resize DATETIME --end DATE | add DATETIME --end DATE movie:TITLE | diff | clear [--from DATE] [--to DATE]
                                         (dates are local to the channel: 2026-10-31 or 2026-10-31T20:00)
+  daytuner chapters clear                (forget the cached chapters; they are read again at the next plan)
   daytuner run <name> [--yes]            (a dry run without --yes)
   daytuner cursor <name> list | rewind <sequence> <k> | set <sequence> <episode-number>
 Common: --tunarr URL (or TUNARR_URL)  --db FILE (or DAYTUNER_DB, default state/daytuner.db)`;
@@ -100,9 +101,9 @@ export async function runCli(argv: string[], io: CliEnv): Promise<number> {
         const channels = await client.channels();
         const ch = channels.find((c) => c.id === wanted || String(c.number) === wanted || slug(c.name) === slug(wanted));
         if (!ch) throw new Error(`no Tunarr channel matches "${wanted}" (channels: ${channels.map((c) => c.name).join(', ')})`);
-        const resolved = await resolveSchedule(parsed, client); // fail now, not at the first run, if the file does not fit the library
-        const found = placesFromLineup(resolved.schedule, await client.lineup(ch.id));
         const store = openStore();
+        const resolved = await resolveSchedule(parsed, cachedSource(client, store, io.clock)); // fail now, not at the first run, if the file does not fit the library
+        const found = placesFromLineup(resolved.schedule, await client.lineup(ch.id));
         const added = store.addChannel({
           name: parsed.channel, tunarrId: ch.id, floorMs: parseDuration(values.floor), stepMs: parseDuration(values.step),
           schedule: text, state: emptyPlanState(Number(values.seed)), edge: ch.startTime + ch.duration, at: io.clock.now(),
@@ -124,13 +125,13 @@ export async function runCli(argv: string[], io: CliEnv): Promise<number> {
       if (sub === 'set-schedule' && a && b) {
         const text = readFileSync(b, 'utf8');
         const client = reader();
-        await resolveSchedule(parseScheduleFile(text), client);
         const store = openStore();
+        await resolveSchedule(parseScheduleFile(text), cachedSource(client, store, io.clock));
         const before = store.channel(a);
         if (!before) throw new Error(`no channel named "${a}"`);
         if (text !== before.schedule) {
           const zone = parseScheduleFile(text).timezone;
-          const impact = await revisionImpact({ store, client }, a, text);
+          const impact = await revisionImpact({ store, client, clock: io.clock }, a, text);
           if (impact.staged > 0) {
             io.out(`Staged slots checked against the new schedule (${impact.staged}):`);
             io.out(formatChanges(impact.changes, zone, impact.titles, 'The new schedule changes'));
@@ -275,12 +276,19 @@ export async function runCli(argv: string[], io: CliEnv): Promise<number> {
       } else {
         const verb = r.action === 'appended' ? 'Appended' : 'Would append (dry run, nothing was written)';
         io.out(`${verb}: ${r.slots} slots, ${r.items} items, ${dayLabel(r.totalMs ?? 0)}. The lineup was ${dayLabel(r.aheadBefore)} ahead.`);
-        const resolved = await resolveSchedule(parseScheduleFile(ch.schedule), client);
+        const resolved = await resolveSchedule(parseScheduleFile(ch.schedule), cachedSource(client, store, io.clock));
         if (r.planned) io.out(`\n${formatMetrics(computeMetrics(r.planned, { grid: resolved.schedule.grid, zone: resolved.schedule.zone }))}`);
         io.out(`\n${formatWarnings(r.warnings, zone, resolved.titles)}`);
         for (const n of resolved.notes) io.out(`note: ${n}`);
         if (r.action === 'would-append') io.out('\nAdd --yes to write this to Tunarr.');
       }
+      store.close();
+      return 0;
+    }
+
+    if (command === 'chapters' && rest[0] === 'clear') {
+      const store = openStore();
+      io.out(`Forgot ${store.clearChapterCache()} cached chapter list(s). The next plan reads them from Tunarr again.`);
       store.close();
       return 0;
     }
@@ -308,7 +316,7 @@ export async function runCli(argv: string[], io: CliEnv): Promise<number> {
       if (sub === 'show') {
         const slots = store.stagedSlots(ch.id, date(values.from), date(values.to));
         if (slots.length === 0) io.out('Nothing is staged.');
-        const check = slots.length === 0 ? undefined : await stageCheck({ store, client: reader() }, name!);
+        const check = slots.length === 0 ? undefined : await stageCheck({ store, client: reader(), clock: io.clock }, name!);
         const troubled = new Map<number, string[]>();
         for (const c of check?.conflicts ?? []) troubled.set(c.start, [...(troubled.get(c.start) ?? []), `CONFLICT (${c.reason}): ${c.message}`]);
         for (const w of check?.pinProblems ?? []) {
@@ -389,7 +397,7 @@ export async function runCli(argv: string[], io: CliEnv): Promise<number> {
         return 0;
       }
       if (sub === 'diff') {
-        const d = await stageDiff({ store, client: reader() }, name!);
+        const d = await stageDiff({ store, client: reader(), clock: io.clock }, name!);
         io.out(d.staged === 0 ? 'Nothing is staged.' : formatChanges(d.changes, zone, d.titles, 'What staging changes compared with planning the schedule fresh'));
         store.close();
         return 0;
@@ -409,7 +417,7 @@ export async function runCli(argv: string[], io: CliEnv): Promise<number> {
       if (!ch) throw new Error(`no channel named "${name}"`);
       const client = reader();
       if (sub === 'list') {
-        const { schedule } = await resolveSchedule(parseScheduleFile(ch.schedule), client);
+        const { schedule } = await resolveSchedule(parseScheduleFile(ch.schedule), cachedSource(client, store, io.clock));
         for (const s of listSequences(schedule)) {
           const st = ch.state.sequences[s.key] ?? { position: 0, history: 0 };
           io.out(`${s.key}  pool ${s.pool}  next episode ${st.position + 1} of ${s.length}  (${st.history} behind it have aired)  slots ${s.slots.join(', ')}`);

@@ -13,7 +13,7 @@ export interface LibrarySource {
   fillerLists(): Promise<{ id: string; name: string }[]>;
   fillerListClips(listId: string): Promise<{ id: string; duration: number }[]>;
   /** Chapter markers of one program. Optional: a source without it plans with the every-N-minutes offers. */
-  chapters?(programId: string): Promise<{ start: number; end: number; type: Chapter['type'] }[]>;
+  chapters?(programId: string, duration: number): Promise<{ start: number; end: number; type: Chapter['type'] }[]>;
 }
 
 /** How many chapter requests run at once. Each takes about 0.4 s in Tunarr. */
@@ -159,7 +159,7 @@ export async function resolveSchedule(file: ScheduleFile, source: LibrarySource)
       while (next < ids.length) {
         const id = ids[next++]!;
         try {
-          const chapters = await source.chapters!(id);
+          const chapters = await source.chapters!(id, programs[id]!.duration);
           if (chapters.length > 0) programs[id] = { ...programs[id]!, chapters };
         } catch {
           failed++;

@@ -15,7 +15,7 @@ are in [`roadmap.md`](roadmap.md); verified Tunarr facts are in [`tunarr-api.md`
 | 4 Schedules and staging | built, verified on the test copy | Design settled (architecture.md, "Phase 4 storage"). Revisions and all six slices of staging (store, `stage generate|show|clear|lock|unlock|pin|unpin`, locked slots committed as stored, lock conflicts, pins, conflicts shown by `stage show`, `stage delete|resize|add`) built), the preview diff and the revision dry-run against locked slots built; staging was run on the test copy and a locked, a pinned and an added slot were committed and read back identical (see `tunarr-api.md`) |
 | 5 Web interface | not started | Needs design first |
 
-Tests: 321 pass across the engine, client, store, schedule, worker and CLI, plus 3 client integration
+Tests: 326 pass across the engine, client, store, schedule, worker and CLI, plus 3 client integration
 tests that run only against a real Tunarr (`TUNARR_URL`).
 
 ## Needed for 1.0
@@ -65,7 +65,7 @@ Settled this session and recorded under Decided in the roadmap: the exception fa
 
 Each is one of: **build** (clear what to do), **verify** (find out), **know** (accepted, worth knowing).
 
-- **know** (measured: about two minutes per command on the 161-episode test library) Chapters are loaded for every program in the schedule's pools whenever the schedule has mid breaks: one call each (about 0.4 s), 8 at a time, on every plan. A preview of 161 episodes plus the movies took under a minute. A cache in the store would remove the cost; add one if it hurts. A program whose chapters cannot be read plans with the every-N-minutes offers, with a note.
+- **know** Chapters are cached in the store (`chapter_cache`), keyed by program id: a cached list is used while the program's length is unchanged and it is under 30 days old, and "has none" is cached too. On the test copy a staging command took 50 s the first time and 7 s after. `daytuner chapters clear` forgets them, for example after the library is scanned again. A program whose chapters cannot be read plans with the every-N-minutes offers, with a note, and is not cached.
 - **know** `channel add` shows where each ordered show stands in the channel's existing lineup, and `channel adopt-history` applies it (the last item of the pool in the lineup decides, so a trailing rerun can pull the place back; `cursor set` fixes one). Only for a channel DayTuner has not written to.
 - **build** The metrics are not stored over time, which the dashboard needs.
 - **verify** Playback of ad and filler clips and the media server's guide (phase 3, above).

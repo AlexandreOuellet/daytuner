@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { emptyPlanState } from '@daytuner/engine';
 import { Store } from '@daytuner/store';
 import { FakeTunarr, TunarrClient } from '@daytuner/tunarr-client';
+import { CHAPTER_CACHE_LIFETIME_MS } from './chapters.js';
 import { adjustCursor, adoptHistory, revisionImpact, stageCheck, stageDiff, stageEdit, stageGenerate, stageRefresh, ConsistencyError, listSequences, resync, topUp, type WorkerDeps } from './worker.js';
 
 const DAY = 86_400_000;
@@ -607,6 +608,34 @@ describe('the preview diff', () => {
     expect(impact.conflicts.map((c) => [c.start, c.reason])).toEqual([[movie.start, 'window-changed']]);
     expect(impact.changes.length).toBeGreaterThan(0);
     expect(JSON.stringify([s.store.channel('Test'), s.store.stagedSlots(s.id)])).toBe(before);
+  });
+});
+
+describe('the chapter cache', () => {
+  const asked = (s: ReturnType<typeof setup>) => s.fake.requests.filter((q) => q.includes('/stream_details')).length;
+
+  it('reads chapters once, and later plans take them from the store', async () => {
+    const s = setup();
+    s.fake.data.movies[0]!.chapters = [{ start: 0, end: 30 * MIN }, { start: 30 * MIN, end: 85 * MIN }];
+    await topUp(s.deps, 'Test', { dryRun: true });
+    const first = asked(s);
+    expect(first).toBeGreaterThan(0);
+    await topUp(s.deps, 'Test', { dryRun: true });
+    await stageGenerate(s.deps, 'Test', { to: s.store.channel('Test')!.edge + 2 * DAY });
+    expect(asked(s)).toBe(first);
+  });
+
+  it('reads again when a program changed length, or the entry is older than its lifetime', async () => {
+    const s = setup();
+    await topUp(s.deps, 'Test', { dryRun: true });
+    const first = asked(s);
+    s.fake.data.movies[0]!.duration += 1000;
+    await topUp(s.deps, 'Test', { dryRun: true });
+    expect(asked(s)).toBe(first + 1);
+    const second = asked(s);
+    s.clock.t += CHAPTER_CACHE_LIFETIME_MS + 1;
+    await stageGenerate(s.deps, 'Test', { to: s.store.channel('Test')!.edge + 2 * DAY });
+    expect(asked(s)).toBeGreaterThan(second);
   });
 });
 

@@ -10,6 +10,7 @@ daytuner channel list | status <name> | commits <name> | adopt-history <name> [-
 daytuner stage <name> generate --to DATE [--keep DATE..DATE] | show [--from DATE] [--to DATE] | lock DATETIME | unlock DATETIME
                    | pin DATETIME BLOCK movie:TITLE | pin DATETIME BLOCK episode:SHOW/TITLE | unpin DATETIME BLOCK
                    | delete DATETIME | resize DATETIME --end DATE | add DATETIME --end DATE movie:TITLE | diff | clear [--from DATE] [--to DATE]
+daytuner chapters clear                (forget the cached chapters; they are read again at the next plan)
 daytuner run <name> [--yes]
 daytuner cursor <name> list | rewind <sequence> <k> | set <sequence> <episode-number>
 ```

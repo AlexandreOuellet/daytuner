@@ -318,3 +318,24 @@ describe('staged slots', () => {
     expect(() => store.clearStaged('ghost')).toThrow(/no channel/);
   });
 });
+
+describe('the chapter cache', () => {
+  const ch = [{ start: 0, end: 1000, type: 'chapter' as const }];
+  it('returns what was cached while the length is the same and the entry is fresh', () => {
+    const s = Store.open(':memory:');
+    s.cacheChapters('p1', 5000, ch, 100);
+    expect(s.cachedChapters('p1', 5000, 0)).toEqual(ch);
+    expect(s.cachedChapters('p1', 5001, 0)).toBeUndefined(); // the program changed length
+    expect(s.cachedChapters('p1', 5000, 101)).toBeUndefined(); // too old
+    expect(s.cachedChapters('p2', 5000, 0)).toBeUndefined();
+  });
+  it('remembers that a program has no chapters, replaces an entry, and can be cleared', () => {
+    const s = Store.open(':memory:');
+    s.cacheChapters('p1', 5000, [], 1);
+    expect(s.cachedChapters('p1', 5000, 0)).toEqual([]);
+    s.cacheChapters('p1', 5000, ch, 2);
+    expect(s.cachedChapters('p1', 5000, 0)).toEqual(ch);
+    expect(s.clearChapterCache()).toBe(1);
+    expect(s.cachedChapters('p1', 5000, 0)).toBeUndefined();
+  });
+});

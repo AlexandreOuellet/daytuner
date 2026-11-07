@@ -5,6 +5,7 @@
 
 import { adjustSequence, diffSlots, plan, type SlotChange, type Clock, type StagedWindow, type CursorAdjustment, type LockConflict, type PlannedSlot, type PlanWarning, type Schedule } from '@daytuner/engine';
 import { parseScheduleFile, resolveSchedule } from '@daytuner/schedule';
+import { cachedSource } from './chapters.js';
 import type { ChannelRecord, CommitRecord, PinRecord, StagedSlotRecord, Store } from '@daytuner/store';
 import { alignToGrid, appendVerified, toLineupItems, totalDuration, type LineupItem, type TunarrClient } from '@daytuner/tunarr-client';
 
@@ -130,7 +131,7 @@ export async function topUp(deps: WorkerDeps, channelName: string, opts: TopUpOp
   const base = { ...(recovered ? { recovered } : {}), aheadBefore: ahead, warnings: [] as PlanWarning[], conflicts: [] as LockConflict[] };
   if (ahead >= ch.floorMs + ch.stepMs) return { action: 'none', ...base };
 
-  const { schedule, library, fillerListIds, titles } = await resolveSchedule(parseScheduleFile(ch.schedule), client);
+  const { schedule, library, fillerListIds, titles } = await resolveSchedule(parseScheduleFile(ch.schedule), cachedSource(client, store, clock));
   const { from, flex } = alignToGrid(edgeNow, schedule.grid);
   const { locked, pins, windows } = stagedInputs(store, ch, edgeNow, library, titles);
   const result = plan({ schedule, library, state: ch.state, from, to: now + ch.floorMs + ch.stepMs, locked, pins, windows });
@@ -277,7 +278,7 @@ export async function stageGenerate(
   const { store, client, clock } = deps;
   const ch = store.channel(channelName);
   if (!ch) throw new ConsistencyError(`no channel named "${channelName}" in the store`);
-  const { schedule, library, titles } = await resolveSchedule(parseScheduleFile(ch.schedule), client);
+  const { schedule, library, titles } = await resolveSchedule(parseScheduleFile(ch.schedule), cachedSource(client, store, clock));
   const { from } = alignToGrid(ch.edge, schedule.grid);
   const keepFrom = range.keepFrom ?? from;
   const keepTo = range.keepTo ?? range.to;
@@ -303,13 +304,13 @@ export interface StageDiff {
  * The effect of everything done by hand: the staged slots as the next commit would plan them, compared with the
  * same stretch planned from the schedule alone. Writes nothing.
  */
-export async function stageDiff(deps: Pick<WorkerDeps, 'store' | 'client'>, channelName: string): Promise<StageDiff> {
-  const { store, client } = deps;
+export async function stageDiff(deps: Pick<WorkerDeps, 'store' | 'client' | 'clock'>, channelName: string): Promise<StageDiff> {
+  const { store, client, clock } = deps;
   const ch = store.channel(channelName);
   if (!ch) throw new ConsistencyError(`no channel named "${channelName}" in the store`);
   const staged = store.stagedSlots(ch.id);
   if (staged.length === 0) return { changes: [], staged: 0, titles: {} };
-  const { schedule, library, titles } = await resolveSchedule(parseScheduleFile(ch.schedule), client);
+  const { schedule, library, titles } = await resolveSchedule(parseScheduleFile(ch.schedule), cachedSource(client, store, clock));
   const { from } = alignToGrid(ch.edge, schedule.grid);
   const to = Math.max(...staged.map((s) => s.start)) + 1;
   const fresh = plan({ schedule, library, state: ch.state, from, to });
@@ -333,15 +334,15 @@ export interface RevisionImpact {
  * one, with the same locks, pins and shapes, and reports the locked slots that would no longer fit and what moved.
  * Writes nothing.
  */
-export async function revisionImpact(deps: Pick<WorkerDeps, 'store' | 'client'>, channelName: string, yaml: string): Promise<RevisionImpact> {
-  const { store, client } = deps;
+export async function revisionImpact(deps: Pick<WorkerDeps, 'store' | 'client' | 'clock'>, channelName: string, yaml: string): Promise<RevisionImpact> {
+  const { store, client, clock } = deps;
   const ch = store.channel(channelName);
   if (!ch) throw new ConsistencyError(`no channel named "${channelName}" in the store`);
   const staged = store.stagedSlots(ch.id);
   const parsed = parseScheduleFile(yaml);
-  const next = await resolveSchedule(parsed, client);
+  const next = await resolveSchedule(parsed, cachedSource(client, store, clock));
   if (staged.length === 0) return { conflicts: [], changes: [], staged: 0, titles: next.titles };
-  const current = await resolveSchedule(parseScheduleFile(ch.schedule), client);
+  const current = await resolveSchedule(parseScheduleFile(ch.schedule), cachedSource(client, store, clock));
   const to = Math.max(...staged.map((s) => s.start)) + 1;
   const planUnder = (r: typeof current) => {
     const { from } = alignToGrid(ch.edge, r.schedule.grid);
@@ -365,13 +366,13 @@ export interface StageCheck {
  * end of the committed lineup through the last staged slot with the locks and pins, and reports the lock
  * conflicts and the pin problems.
  */
-export async function stageCheck(deps: Pick<WorkerDeps, 'store' | 'client'>, channelName: string): Promise<StageCheck> {
-  const { store, client } = deps;
+export async function stageCheck(deps: Pick<WorkerDeps, 'store' | 'client' | 'clock'>, channelName: string): Promise<StageCheck> {
+  const { store, client, clock } = deps;
   const ch = store.channel(channelName);
   if (!ch) throw new ConsistencyError(`no channel named "${channelName}" in the store`);
   const staged = store.stagedSlots(ch.id);
   if (staged.length === 0) return { conflicts: [], pinProblems: [], titles: {} };
-  const { schedule, library, titles } = await resolveSchedule(parseScheduleFile(ch.schedule), client);
+  const { schedule, library, titles } = await resolveSchedule(parseScheduleFile(ch.schedule), cachedSource(client, store, clock));
   const { from } = alignToGrid(ch.edge, schedule.grid);
   const { locked, pins, windows } = stagedInputs(store, ch, from, library, titles);
   const to = Math.max(...staged.map((s) => s.start)) + 1;
@@ -573,13 +574,13 @@ export async function adoptHistory(
   channelName: string,
   opts: { dryRun?: boolean } = {},
 ): Promise<{ found: FoundPlace[]; titles: Record<string, string> }> {
-  const { store, client } = deps;
+  const { store, client, clock } = deps;
   const ch = store.channel(channelName);
   if (!ch) throw new ConsistencyError(`no channel named "${channelName}" in the store`);
   if (store.commits(ch.id, 1).length > 0) {
     throw new ConsistencyError(`DayTuner has already written to "${channelName}", so its own state is the truth; use \`cursor\` to move a show's place`);
   }
-  const { schedule, titles } = await resolveSchedule(parseScheduleFile(ch.schedule), client);
+  const { schedule, titles } = await resolveSchedule(parseScheduleFile(ch.schedule), cachedSource(client, store, clock));
   const found = placesFromLineup(schedule, await client.lineup(ch.tunarrId));
   if (!opts.dryRun) {
     const sequences = { ...ch.state.sequences };
@@ -602,7 +603,7 @@ export async function adjustCursor(
 ): Promise<{ before: { position: number; history: number }; after: { position: number; history: number } }> {
   const ch = deps.store.channel(channelName);
   if (!ch) throw new ConsistencyError(`no channel named "${channelName}" in the store`);
-  const { schedule } = await resolveSchedule(parseScheduleFile(ch.schedule), deps.client);
+  const { schedule } = await resolveSchedule(parseScheduleFile(ch.schedule), cachedSource(deps.client, deps.store, deps.clock));
   const info = listSequences(schedule).find((s) => s.key === sequenceKey);
   if (!info) {
     throw new ConsistencyError(`no ordered pool is called "${sequenceKey}" (known: ${listSequences(schedule).map((s) => s.key).join(', ') || 'none'})`);

@@ -70,6 +70,8 @@ export interface StagedSlotRecord {
   generatedAt: number;
 }
 
+export type ChapterKind = 'chapter' | 'intro' | 'outro' | 'break' | 'recap';
+
 export type CommitStatus = 'pending' | 'done' | 'abandoned';
 
 export interface SlotSummary {
@@ -182,6 +184,12 @@ create table if not exists staged_slots (
   planned text not null,
   generated_at integer not null,
   primary key (channel_id, start)
+);
+create table if not exists chapter_cache (
+  program_id text primary key,
+  duration integer not null,
+  chapters text not null,
+  fetched_at integer not null
 );
 create index if not exists commits_by_channel on commits(channel_id, id);
 -- At most one pending commit per channel: a second one would mean two writers.
@@ -510,6 +518,27 @@ export class Store {
     const ch = this.channel(name);
     if (!ch) throw new StoreError(`no channel named "${name}"`);
     return Number(this.db.prepare('delete from staged_slots where channel_id = ? and start >= ? and start < ?').run(ch.id, from, to).changes);
+  }
+
+  /**
+   * Chapters read earlier for a program, or undefined when there are none, the program's length is not `duration`
+   * any more, or they were read before `notBefore`.
+   */
+  cachedChapters(programId: string, duration: number, notBefore: number): { start: number; end: number; type: ChapterKind }[] | undefined {
+    const r = this.db.prepare('select * from chapter_cache where program_id = ? and duration = ? and fetched_at >= ?').get(programId, duration, notBefore);
+    return r ? (JSON.parse(String((r as Row)['chapters'])) as { start: number; end: number; type: ChapterKind }[]) : undefined;
+  }
+
+  /** Remembers a program's chapters (an empty list too: "has none" is also worth knowing). */
+  cacheChapters(programId: string, duration: number, chapters: readonly { start: number; end: number; type: ChapterKind }[], at: number): void {
+    this.db
+      .prepare('insert or replace into chapter_cache (program_id, duration, chapters, fetched_at) values (?, ?, ?, ?)')
+      .run(programId, duration, JSON.stringify(chapters), at);
+  }
+
+  /** Forgets every cached chapter list, so the next plan reads them again. Returns how many were dropped. */
+  clearChapterCache(): number {
+    return Number(this.db.prepare('delete from chapter_cache').run().changes);
   }
 
   commits(channelId: number, limit = 50): CommitRecord[] {

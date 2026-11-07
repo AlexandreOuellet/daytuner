@@ -166,4 +166,4 @@ its first block, and a 2.5-hour slot with a pinned movie was added inside a day.
 - The commit was recorded as done with no conflicts, and the staged slots it covered were gone from staging.
 
 Staging one day takes about two minutes when the library has to be read again (chapters of every program in the pools),
-so each edit command is slow on a large library; a cache of chapters in the store would fix it.
+so each edit command was slow on a large library. Chapters are now cached in the store (see `status.md`): the same command took 50 s the first time and 7 s after.
