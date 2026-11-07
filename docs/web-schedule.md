@@ -62,7 +62,16 @@ fit the shortest slot that uses it), adds and removes shows, sets a movie filter
 pool, and removes one no slot uses. Pools cannot be renamed yet.
 
 Saving applies the week and pools to the channel file (`applyScheduleModel`), keeping its comments, the ads and the special days, and
-is a new revision with the dry run against locked staged slots. Special days (the calendar) are the next piece of this page.
+is a new revision with the dry run against locked staged slots.
+
+### Special days (`apps/ui/src/pages/SpecialDays.tsx`)
+
+A calendar of the twelve months from this one, with the days that have a special day marked and the state in words as well as a mark
+(★ planned from the schedule when its time comes, ◆ staged, ✓ already in Tunarr). A day opens a panel: what is planned there (with a
+warning when no slot starts at that time on that weekday, so it would replace nothing), a switch for "counts as played", Remove, and an
+Add form: the slot to replace (the week's slots on that weekday), a movie (searched by title) or an episode (a show, then an episode),
+"this year only" (otherwise every year), and "counts as played". Saving is a new revision with the dry run, like the rest. The page points
+to staging for a bigger event; the "Plan this day in staging" button waits for the staging editor, so for now it shows the CLI command.
 
 ## How it saves
 

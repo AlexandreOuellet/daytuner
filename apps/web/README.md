@@ -64,7 +64,9 @@ needs the server started with `DAYTUNER_ALLOW_WRITES=1`.
 | `POST .../run` | `{ dryRun? }` | job: plan, or commit when `dryRun` is `false` and writing is on |
 | `POST .../resync`, `/adopt-history` | `{ apply? }` | settle a pending commit or adopt Tunarr's end; set shows' places from the lineup (dry run unless `apply`) |
 | `GET .../ads`, `POST .../ads/sample`, `POST .../ads` | `{ settings }` / `{ settings, force? }` | the ad, bumper and filler settings as plain numbers with Tunarr's filler lists; job: plan a sample episode and movie with settings applied (saves nothing); job: save them as a new revision (refused over locked slots unless `force`) |
-| `GET .../schedule/model`, `POST .../schedule/model` | `{ week, pools, check?, force? }` | the week's slots and the pools as data; job: save a changed week and pools as a new revision (`check` only reports what it would do to locked slots) |
+| `GET .../schedule/model`, `POST .../schedule/model` | `{ week, pools, exceptions?, check?, force? }` | the week's slots, the pools and the special days as data; job: save a changed week and pools as a new revision (`check` only reports what it would do to locked slots) |
+| `POST .../special-days` | `{ exceptions?, week? }` | where the special days fall in the coming year, and each one's state (`committed`, `staged`, `rule`) and whether a slot starts then |
+| `GET /api/library/movies?q=`, `GET /api/library/shows/:id/episodes` | | movies by title (two letters or more), and a show's episodes, for choosing what a special day plays |
 | `POST .../pools/stats` | `{ pools }` | job: how many programs each pool (saved or not) holds, and how long each is |
 | `GET /api/library` | | the library's shows and movie genres, for pickers |
 | `GET .../export` | | the schedule with the library's ids beside every title |

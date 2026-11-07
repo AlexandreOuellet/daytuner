@@ -3,7 +3,7 @@ import { api, type Library, type PoolModel, type PoolStats, type SaveResult, typ
 import { PoolsPanel } from '../components/PoolsPanel';
 import { WeekGrid } from '../components/WeekGrid';
 import { clock } from '../format';
-import { channelLink } from '../router';
+import { channelLink, specialLink } from '../router';
 import { useLoad } from '../useLoad';
 import { DAY_NAMES, HOUR, keyOf, slotLength } from '../week';
 
@@ -169,6 +169,8 @@ export function Schedule({ name }: { name: string }) {
           <button type="button" onClick={addSlot}>Add</button>
         </div>
       </div>
+
+      <p><a href={specialLink(name)}>Special days</a>: a day with a different program, such as Halloween.</p>
 
       <h2>Pools</h2>
       <p className="muted small">A pool is where a slot draws its programs from. A slot only picks one.</p>

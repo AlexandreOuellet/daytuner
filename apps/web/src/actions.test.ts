@@ -235,6 +235,35 @@ describe('actions', () => {
     expect((await t.post('/api/channels/Test/schedule/model', {})).status).toBe(400);
   });
 
+  it('places special days on the calendar with their state, saves them, and finds programs to play', async () => {
+    const saved = (await t.get('/api/channels/Test/schedule/model')).body.model;
+    expect(saved.exceptions).toEqual([]);
+    const exceptions = [
+      { on: { month: 11, day: 9 }, at: 20 * 3_600_000, play: { movie: 'Movie 3', id: 'mov3' } },      // a Monday 20:00 slot, after the end of the committed lineup
+      { on: { month: 11, day: 13 }, at: 20 * 3_600_000, play: { show: 'Show A', id: 'show-a', title: 'Ep 4' } },
+    ];
+    const occ = (await t.post('/api/channels/Test/special-days', { exceptions })).body;
+    expect(occ.map((o: any) => [o.index, o.date, o.state, o.matchesSlot])).toEqual([[0, '2026-11-09', 'rule', true], [1, '2026-11-13', 'rule', true], [0, '2027-11-09', 'rule', true], [1, '2027-11-13', 'rule', true]]);
+    expect((await t.post('/api/channels/Test/special-days', {})).body).toEqual([]); // the saved file has none
+    const edge = t.store.channel('Test')!.edge;
+    await t.job('/api/channels/Test/stage/generate', { to: edge + 6 * DAY });
+    const staged = (await t.post('/api/channels/Test/special-days', { exceptions })).body;
+    expect(staged.find((o: any) => o.date === '2026-11-13').state).toBe('staged'); // its slot is staged
+    expect(staged.find((o: any) => o.date === '2027-11-13').state).toBe('rule');
+
+    const rejected = await t.post('/api/channels/Test/schedule/model', { week: saved.week, pools: saved.pools, exceptions: [{ on: { month: 2, day: 30 }, at: 0, play: { movie: 'x' } }] });
+    expect(rejected.status).toBe(400);
+    const done = await t.job('/api/channels/Test/schedule/model', { week: saved.week, pools: saved.pools, exceptions });
+    expect(done.result).toMatchObject({ saved: true, revision: 2 });
+    expect((await t.get('/api/channels/Test/schedule/model')).body.model.exceptions).toHaveLength(2);
+    expect((await t.post('/api/channels/Test/special-days', {})).body).toHaveLength(4);
+
+    expect((await t.get('/api/library/movies?q=movie 1')).body.map((m: any) => m.title)).toEqual(['Movie 1', 'Movie 10', 'Movie 11']);
+    expect((await t.get('/api/library/movies?q=m')).body).toEqual([]); // too short to search
+    const eps = (await t.get('/api/library/shows/show-a/episodes')).body;
+    expect(eps[0]).toMatchObject({ id: 'ep1', title: 'Ep 1', season: 1, episode: 1 });
+  });
+
   it('reads what unsaved pools hold, and lists the shows and genres of the library', async () => {
     const r = await t.job('/api/channels/Test/pools/stats', { pools: { mine: { shows: [{ show: 'Show A' }] }, odd: { movies: { genre: 'Comedy', duration: { op: '<=', ms: 90 * MIN } } } } });
     expect(r.state, r.message).toBe('done');

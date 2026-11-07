@@ -4,7 +4,7 @@
 
 import type { Context, Hono } from 'hono';
 import type { Clock } from '@daytuner/engine';
-import { addIds, adSettingsOf, applyAdSettings, applyScheduleModel, scheduleModelOf, type ScheduleModel, findProgram, parseLocalDateTime, parseScheduleFile, resolveSchedule, type AdSettings } from '@daytuner/schedule';
+import { addIds, adSettingsOf, applyAdSettings, applyScheduleModel, exceptionOccurrences, scheduleModelOf, type ExceptionModel, type ScheduleModel, findProgram, parseLocalDateTime, parseScheduleFile, resolveSchedule, type AdSettings } from '@daytuner/schedule';
 import type { ChannelRecord, PinRecord, Store } from '@daytuner/store';
 import type { TunarrClient } from '@daytuner/tunarr-client';
 import {
@@ -215,7 +215,7 @@ export function registerActions(app: Hono, d: ActionDeps): void {
   app.post('/api/channels/:name/schedule/model', async (c) => {
     const ch = d.channel(c.req.param('name'));
     const b = await bodyOf(c);
-    const m = b as unknown as Pick<ScheduleModel, 'week' | 'pools'>;
+    const m = b as unknown as Pick<ScheduleModel, 'week' | 'pools'> & { exceptions?: ExceptionModel[] };
     if (!Array.isArray(m.week) || typeof m.pools !== 'object' || m.pools === null) throw new BadRequest('the request needs "week" (a list of slots) and "pools"');
     let yaml: string;
     try {
@@ -228,6 +228,40 @@ export function registerActions(app: Hono, d: ActionDeps): void {
       return job(c, ch.name, 'check schedule', async () => ({ saved: false, revision: ch.revision, impact: yaml === ch.schedule ? undefined : await revisionImpact(deps, ch.name, yaml) }));
     }
     return job(c, ch.name, 'save schedule', () => saveSchedule(ch, yaml, force));
+  });
+
+  /**
+   * Where the special days fall in the coming year, and what state each is in: `committed` (already in Tunarr), `staged`, or
+   * `rule` (the schedule will plan it when its time comes). Takes the special days (and week) being edited, or the saved ones.
+   */
+  app.post('/api/channels/:name/special-days', async (c) => {
+    const ch = d.channel(c.req.param('name'));
+    const b = await bodyOf(c).catch(() => ({}) as Body);
+    const saved = scheduleModelOf(parseScheduleFile(ch.schedule));
+    const exceptions = Array.isArray(b['exceptions']) ? (b['exceptions'] as ExceptionModel[]) : saved.exceptions;
+    const week = Array.isArray(b['week']) ? (b['week'] as ScheduleModel['week']) : saved.week;
+    const now = d.clock.now();
+    const staged = d.store.stagedSlots(ch.id);
+    return c.json(
+      exceptionOccurrences({ timezone: saved.timezone, week, exceptions }, now - 31 * 86_400_000, now + 400 * 86_400_000).map((o) => ({
+        ...o,
+        state: o.start < ch.edge ? 'committed' : staged.some((r) => r.start <= o.start && o.start < r.end) ? 'staged' : 'rule',
+      })),
+    );
+  });
+
+  /** Movies of the library whose title contains `q` (up to 30), for choosing what a special day plays. */
+  app.get('/api/library/movies', async (c) => {
+    const q = (c.req.query('q') ?? '').trim().toLowerCase();
+    if (q.length < 2) return c.json([]);
+    const all = await d.client.movies();
+    return c.json(all.filter((m) => m.title.toLowerCase().includes(q)).slice(0, 30).map((m) => ({ id: m.id, title: m.title, duration: m.duration })));
+  });
+
+  /** The episodes of one show, in viewing order. */
+  app.get('/api/library/shows/:id/episodes', async (c) => {
+    const eps = await d.client.episodes(c.req.param('id'));
+    return c.json(eps.map((e) => ({ id: e.id, title: e.title, season: e.season, episode: e.episode, duration: e.duration })));
   });
 
   /** What pools hold (how many programs, how long each), for pools that may not be saved yet. */

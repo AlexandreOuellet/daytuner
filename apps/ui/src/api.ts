@@ -60,7 +60,14 @@ export interface PoolModel {
   movies?: { genre?: string; duration?: { op: '<=' | '<' | '>=' | '>' | '='; ms: number } };
   order?: 'sequential' | 'shuffle';
 }
-export interface ScheduleModel { timezone: string; grid: number; week: SlotModel[]; pools: Record<string, PoolModel> }
+export interface ExceptionModel {
+  on: { month: number; day: number; year?: number };
+  at: number;
+  play: { show: string; id?: string; title: string } | { movie: string; id?: string };
+  counts?: string | false;
+}
+export interface Occurrence { index: number; date: string; start: number; matchesSlot: boolean; state: 'committed' | 'staged' | 'rule' }
+export interface ScheduleModel { timezone: string; grid: number; week: SlotModel[]; pools: Record<string, PoolModel>; exceptions: ExceptionModel[] }
 export interface PoolStats { count: number; durations: number[]; error?: string }
 export interface Library { shows: { id: string; title: string }[]; genres: string[] }
 
@@ -116,7 +123,10 @@ export const api = {
   scheduleModel: (name: string) => get<{ revision: number; model: ScheduleModel }>(`/api/channels/${encodeURIComponent(name)}/schedule/model`),
   library: () => get<Library>('/api/library'),
   poolStats: (name: string, pools: Record<string, PoolModel>) => runJob<Record<string, PoolStats>>(`/api/channels/${encodeURIComponent(name)}/pools/stats`, { pools }),
-  saveModel: (name: string, model: Pick<ScheduleModel, 'week' | 'pools'>, force = false) =>
-    runJob<SaveResult>(`/api/channels/${encodeURIComponent(name)}/schedule/model`, { week: model.week, pools: model.pools, force }),
+  saveModel: (name: string, model: Pick<ScheduleModel, 'week' | 'pools'> & { exceptions?: ExceptionModel[] }, force = false) =>
+    runJob<SaveResult>(`/api/channels/${encodeURIComponent(name)}/schedule/model`, { week: model.week, pools: model.pools, ...(model.exceptions ? { exceptions: model.exceptions } : {}), force }),
+  specialDays: (name: string, exceptions: ExceptionModel[], week: SlotModel[]) => post<Occurrence[]>(`/api/channels/${encodeURIComponent(name)}/special-days`, { exceptions, week }),
+  movies: (q: string) => get<{ id: string; title: string; duration: number }[]>(`/api/library/movies?q=${encodeURIComponent(q)}`),
+  episodes: (showId: string) => get<{ id: string; title: string; season: number; episode: number; duration: number }[]>(`/api/library/shows/${encodeURIComponent(showId)}/episodes`),
   runs: (name: string) => get<Run[]>(`/api/channels/${encodeURIComponent(name)}/runs`),
 };

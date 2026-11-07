@@ -126,3 +126,18 @@ button.primary { background: var(--accent); color: var(--bg); border-color: var(
 .poolcard fieldset { border: 0; padding: 0; margin: 0; } .poolcard label { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .poolcard input:not([type=radio]), .poolcard select, .editor input[type=time], .editor input:not([type]), .editor input[list] { font: inherit; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); }
 .poolcard input[type=number] { width: 6em; }
+
+.calendar { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 14px; margin: 12px 0; }
+.month { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 10px; }
+.month h2 { font-size: .95rem; margin: 0 0 6px; }
+.dow, .weekrow { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; text-align: center; }
+.dow span { font-size: .7rem; color: var(--ink-3); }
+.daycell { position: relative; padding: 5px 0; border-radius: 6px; border: 1px solid transparent; font-size: .8rem; background: transparent; }
+.daycell:hover { background: var(--grid); }
+.daycell.today { border-color: var(--ink-3); }
+.daycell.mark { background: var(--warn-bg); color: var(--warn); font-weight: 700; }
+.daycell.mark.staged { background: var(--ok-bg); color: var(--ok); } .daycell.mark.committed { background: var(--grid); color: var(--ink-2); }
+.daycell.picked { outline: 2px solid var(--accent); }
+.daycell .star { position: absolute; top: -1px; right: 1px; font-size: .6rem; }
+.special { border-top: 1px solid var(--line); padding-top: 6px; width: 100%; } .special p { margin: 2px 0; }
+.editor h3 { margin: 6px 0 0; font-size: .95rem; }

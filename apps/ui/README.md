@@ -17,4 +17,6 @@ The ads page is built too (the block drawn in order, simple settings with a "Mor
 
 The schedule designer is built for the week and the pools (a week grid with drag, arrow keys and typing, a Pools panel with live counts, saved as a revision).
 
-To build: the calendar of special days, the staging editor (see `docs/status.md`).
+The special days page is built (a calendar of the coming year, with each day's state, adding a movie or an episode, every year or this year only).
+
+To build: the staging editor (see `docs/status.md`).

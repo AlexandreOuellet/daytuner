@@ -49,6 +49,8 @@ const model = () => ({
 });
 const stats = { sitcoms: { count: 300, durations: [22 * 60_000, 44 * 60_000] }, movies: { count: 34, durations: [80 * 60_000, 90 * 60_000, 120 * 60_000] } };
 
+const saves = (posts: { url: string; body: any }[]) => posts.filter((p) => p.url.endsWith('/schedule/model'));
+
 function serve(save?: (b: any) => unknown) {
   const posts: { url: string; body: any }[] = [];
   vi.stubGlobal('fetch', async (url: string, init?: { method?: string; body?: string }) => {
@@ -94,7 +96,7 @@ describe('the schedule designer', () => {
     fireEvent.change(within(screen.getByLabelText('The selected slot')).getByLabelText('Plays from'), { target: { value: 'sitcoms' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save as a new revision' }));
     expect(await screen.findByText(/Saved as revision 2/)).toBeTruthy();
-    const sent = posts.at(-1)!;
+    const sent = saves(posts).at(-1)!;
     expect(sent.url).toBe(`/api/channels/${n}/schedule/model`);
     expect(sent.body.week.find((s: any) => s.day === 1 && s.at === 20.5 * HOUR)).toMatchObject({ pool: 'sitcoms' });
     expect(sent.body.force).toBe(false);
@@ -164,7 +166,7 @@ describe('the schedule designer', () => {
     fireEvent.change(within(screen.getByLabelText('The selected slot')).getByLabelText('Link'), { target: { value: '' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save as a new revision' }));
     await screen.findByText(/Saved as revision/);
-    const sent = posts.at(-1)!.body.week.find((s: any) => s.day === 1 && s.at === 22.25 * HOUR);
+    const sent = saves(posts).at(-1)!.body.week.find((s: any) => s.day === 1 && s.at === 22.25 * HOUR);
     expect(sent.link).toBeUndefined();
     expect(sent.linkMode).toBeUndefined();
   });
@@ -198,7 +200,7 @@ describe('the schedule designer', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add the pool' }));
     fireEvent.click(screen.getByRole('button', { name: 'Save as a new revision' }));
     await screen.findByText(/Saved as revision/);
-    const pools = posts.at(-1)!.body.pools;
+    const pools = saves(posts).at(-1)!.body.pools;
     expect(pools.sitcoms.shows.map((s: any) => s.show)).toEqual(['Show B', 'Show C']);
     expect(pools.movies.movies).toEqual({ genre: 'Drama', duration: { op: '<=', ms: 100 * 60_000 } });
     expect(pools.kids).toEqual({ movies: {}, order: 'shuffle' });
@@ -215,7 +217,7 @@ describe('the schedule designer', () => {
     expect(alert.textContent).toContain('Not saved');
     fireEvent.click(within(alert).getByRole('button', { name: 'Save anyway' }));
     expect(await screen.findByText(/Saved as revision 2/)).toBeTruthy();
-    expect(posts.at(-1)!.body.force).toBe(true);
+    expect(saves(posts).at(-1)!.body.force).toBe(true);
     // The page reloads what was saved (the mock still has the old week); a new change can be discarded.
     const again = await screen.findByRole('group', { name: 'The week' });
     fireEvent.click(await within(again).findByRole('button', { name: /^Mon 20:00, movies/ }));

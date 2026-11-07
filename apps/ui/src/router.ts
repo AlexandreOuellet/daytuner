@@ -1,9 +1,11 @@
 // A tiny hash router: "#/" is the dashboard, "#/channel/NAME" a channel. No library for two pages.
 import { useEffect, useState } from 'react';
 
-export type Route = { page: 'dashboard' } | { page: 'channel'; name: string } | { page: 'cursors'; name: string } | { page: 'ads'; name: string } | { page: 'schedule'; name: string };
+export type Route = { page: 'dashboard' } | { page: 'channel'; name: string } | { page: 'cursors'; name: string } | { page: 'ads'; name: string } | { page: 'schedule'; name: string } | { page: 'special'; name: string };
 
 export function parseRoute(hash: string): Route {
+  const sp = /^#\/channel\/(.+)\/special-days$/.exec(hash);
+  if (sp) return { page: 'special', name: decodeURIComponent(sp[1]!) };
   const sc = /^#\/channel\/(.+)\/schedule$/.exec(hash);
   if (sc) return { page: 'schedule', name: decodeURIComponent(sc[1]!) };
   const a = /^#\/channel\/(.+)\/ads$/.exec(hash);
@@ -15,6 +17,7 @@ export function parseRoute(hash: string): Route {
 }
 
 export const channelLink = (name: string): string => `#/channel/${encodeURIComponent(name)}`;
+export const specialLink = (name: string): string => `#/channel/${encodeURIComponent(name)}/special-days`;
 export const scheduleLink = (name: string): string => `#/channel/${encodeURIComponent(name)}/schedule`;
 export const adsLink = (name: string): string => `#/channel/${encodeURIComponent(name)}/ads`;
 export const cursorsLink = (name: string): string => `#/channel/${encodeURIComponent(name)}/cursors`;
