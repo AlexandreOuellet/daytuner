@@ -316,7 +316,7 @@ export async function runCli(argv: string[], io: CliEnv): Promise<number> {
           if (slot) troubled.set(slot.start, [...(troubled.get(slot.start) ?? []), `${w.severity.toUpperCase()}: ${w.message}`]);
         }
         for (const s of slots) {
-          io.out(`${inZone(s.start, zone)} to ${inZone(s.end, zone)}  ${s.slotId ? slotLabel(s.slotId) : 'added'} ${s.pool ?? ''}${s.locked ? '  [locked]' : ''}${s.edited ? '  [shaped]' : ''}  ${s.planned.programs.length} program(s)${Object.keys(s.pins).length ? `  pinned: ${Object.entries(s.pins).map(([n, p]) => `block ${n} = ${p.title}`).join(', ')}` : ''}`);
+          io.out(`${inZone(s.start, zone)} to ${inZone(s.end, zone)}  ${s.slotId && !s.slotId.startsWith('added@') ? slotLabel(s.slotId) : 'added'} ${s.pool ?? ''}${s.locked ? '  [locked]' : ''}${s.edited ? '  [shaped]' : ''}  ${s.planned.programs.length} program(s)${Object.keys(s.pins).length ? `  pinned: ${Object.entries(s.pins).map(([n, p]) => `block ${n} = ${p.title}`).join(', ')}` : ''}`);
           for (const t of troubled.get(s.start) ?? []) io.out(`    ${t}`);
         }
         store.close();

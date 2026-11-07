@@ -152,3 +152,18 @@ So an id belongs to **one Tunarr instance**: a copy of its data (such as the tes
 Tunarr that re-imports the same Jellyfin library gets new ones. A channel file with ids is therefore not portable to
 another Tunarr; the title label next to each id is what a person reads, and deleting the ids gives a file that matches
 by title anywhere.
+
+### Staging committed on the test copy
+
+On the "Test Channel" of the test copy, 4 days were staged (8 slots), one slot was locked, one had a movie pinned to
+its first block, and a 2.5-hour slot with a pinned movie was added inside a day. `run --yes` then appended 12 slots,
+3759 items, 5.0 days. Read back from Tunarr:
+
+- The channel's start time was unchanged, the old 7136 items were untouched, every appended duration was a whole number,
+  and the channel's duration equalled the sum of the lineup.
+- The locked slot (308 items) was in the lineup item for item as it had been staged.
+- The pinned slot and the added slot held the pinned programs, and their items were identical to what was staged.
+- The commit was recorded as done with no conflicts, and the staged slots it covered were gone from staging.
+
+Staging one day takes about two minutes when the library has to be read again (chapters of every program in the pools),
+so each edit command is slow on a large library; a cache of chapters in the store would fix it.
