@@ -12,10 +12,10 @@ are in [`roadmap.md`](roadmap.md); verified Tunarr facts are in [`tunarr-api.md`
 | 1 Engine | done | Time and grid, breaks, blocks, pools, clips, `plan()`, metrics. 137 tests, a golden test |
 | 2 Client and CLI | done | Reads the library, appends verified lineups, `preview`. Run end to end on the test copy |
 | 3 State and worker | built, not fully verified | SQLite store, safe top-up worker, `channel`, `run`, `cursor` commands. Run end to end on the test copy. Ad and filler playback and the media server's guide not checked |
-| 4 Schedules and staging | started | Design settled (architecture.md, "Phase 4 storage"). Revisions and slice 1 of staging (store, `stage generate|show|clear`) built; locks, pins, conflicts, structure edits and the preview diff to build |
+| 4 Schedules and staging | started | Design settled (architecture.md, "Phase 4 storage"). Revisions and slices 1 and 2 of staging (store, `stage generate|show|clear|lock|unlock`, locked slots committed as stored, lock conflicts) built; pins, structure edits and the preview diff to build |
 | 5 Web interface | not started | Needs design first |
 
-Tests: 270 pass across the engine, client, store, schedule, worker and CLI, plus 3 client integration
+Tests: 274 pass across the engine, client, store, schedule, worker and CLI, plus 3 client integration
 tests that run only against a real Tunarr (`TUNARR_URL`).
 
 ## Needed for 1.0
@@ -35,7 +35,7 @@ Nothing is pushed publicly until all of this is done (see the roadmap).
 - [x] Schedules in the store with revisions, a diff and rollback (`channel set-schedule`, `revisions`, `diff`, `rollback`)
 - [ ] Saving a revision dry-runs it against the locked staged slots and lists those that no longer fit (needs staged slots first)
 - [ ] Staging: generate into staging (done), edit, preview the difference with what is committed, commit (slices 2 to 6 in `staging-design.md`)
-- [ ] Pins, locks and conflicts in the engine (anchored planning is done)
+- [ ] Pins in the engine (anchored planning, locks and lock conflicts are done)
 - [ ] YAML export (import exists as `channel add` and `channel set-schedule`)
 
 **Phase 5: web interface**

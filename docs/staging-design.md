@@ -42,7 +42,7 @@ exactly there (existing rule).
 3. **Locks.** A locked slot is not planned: its stored `planned` items are used as they are, after a
    validity check (see Conflicts). Its effect on the state is applied as the planner would have: ordered
    shows advance by the episodes the slot took from the sequence, bags are marked with the programs and
-   clips it used. Nothing else about the state changes, so the plan after it stays deterministic.
+   clips it used. The random generator's position is not replayed (it would need storing), so the plan after a lock can differ from the plan without it in which clips and movies come up next; it stays deterministic for the same inputs.
 4. **Conflicts.** `PlanResult.conflicts`: for each locked slot that failed its check, the slot, the reason
    (`program-gone`, `duration-changed`, `clip-gone`, `window-changed`, `grid-changed`) and what was done.
    The engine regenerates the slot with its pins kept, as an unlocked slot, and reports it. A slot that
@@ -82,12 +82,14 @@ daytuner stage <channel> clear [--from DATE --to DATE]
 
 1. **Store and read-only staging (built).** The table, `stage generate` (plan a range on a copy of the state, keep
    a part), `stage show`, `stage clear`. The worker ignores staging. Tests on the store and generate.
-2. **Locks.** Engine: staged windows, lock replay with the state effect, the validity check. Worker uses
-   staged slots. `stage lock`, `unlock`. Tests: a locked slot is committed exactly as stored; the state
-   afterwards equals planning it normally.
+2. **Locks (built).** Engine: staged windows, lock replay with the state effect, the validity check. Worker uses
+   staged slots. `stage lock`, `unlock`. Tests: a locked slot is committed exactly as stored; the shows' places
+   afterwards equal planning it normally.
 3. **Pins.** Engine `pinned` source and the pin warnings. `stage pin`, `unpin`. Tests: a pin never moves
    a cursor, never resizes the slot.
-4. **Conflicts.** The validity checks, regeneration with pins, the log entry. Tests: each reason.
+4. **Conflicts.** The validity checks, the regeneration and the log entry came with slice 2 (reasons: `window-changed`,
+   `program-gone`, `duration-changed`, `clip-gone`). What is left: regeneration that keeps the slot's pins (needs pins), and
+   showing the conflicts a commit would record in `stage show`.
 5. **Structure edits.** Delete, add, resize a slot; cutting the neighbours. Tests on the cut rules.
 6. **Preview diff.** What a change did to the slots around it, before commit. Revision dry-run against
    locked slots (from `architecture.md`).

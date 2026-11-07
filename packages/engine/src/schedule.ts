@@ -131,6 +131,7 @@ export type PlanWarningCode =
   | 'rerun-short-history'
   | 'started-mid-slot'
   | 'exception-matches-no-slot'
+  | 'locked-slot-conflict'
   | 'block';
 
 export interface PlanWarning {
@@ -151,10 +152,28 @@ export interface PlanInput {
   to: Ms;
   /** True when planning must end exactly at `to`: a window that contains it is cut there. */
   exact?: boolean;
+  /**
+   * Slots that are locked: each is used exactly as it is stored when the window it came from still holds.
+   * One that no longer fits is planned again and reported in `conflicts`.
+   */
+  locked?: readonly PlannedSlot[];
+}
+
+export type LockConflictReason = 'window-changed' | 'program-gone' | 'duration-changed' | 'clip-gone';
+
+/** A locked slot that could not be used as stored. */
+export interface LockConflict {
+  /** The locked slot's start, and the week slot it came from. */
+  start: Ms;
+  slotId: string;
+  reason: LockConflictReason;
+  message: string;
 }
 
 export interface PlanResult {
   slots: PlannedSlot[];
   state: PlanState;
   warnings: PlanWarning[];
+  /** Locked slots that failed their check and were planned again. */
+  conflicts: LockConflict[];
 }

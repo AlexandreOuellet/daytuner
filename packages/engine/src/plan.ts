@@ -7,7 +7,7 @@ import { dayOfWeek, startOfLocalDay, startOfNextLocalDay, toEpoch, toLocal, asse
 import { emptyBag, markDrawn, orderedPick, pickFromBag, type BagState, type SequenceState } from './pools.js';
 import type { RngState } from './rng.js';
 import type {
-  ExceptionDef, Item, ItemPosition, Library, PlanInput, PlanResult, PlanWarning, PlanWarningCode, PlannedSlot, Pool,
+  ExceptionDef, Item, ItemPosition, LockConflict, Library, PlanInput, PlanResult, PlanWarning, PlanWarningCode, PlannedSlot, Pool,
   Schedule, SlotDef, WarningSeverity,
 } from './schedule.js';
 import { DAY, HOUR, MINUTE, isOnGrid, type Ms } from './time.js';
@@ -76,12 +76,85 @@ export function plan(input: PlanInput): PlanResult {
     warnings: [],
   };
 
+  const locked = new Map((input.locked ?? []).map((s) => [s.start, s]));
+  const conflicts: LockConflict[] = [];
   const slots: PlannedSlot[] = [];
   for (const w of windowsFor(schedule, input.from, input.to, input.exact === true, work)) {
+    const held = locked.get(w.start);
+    locked.delete(w.start);
+    if (held) {
+      const conflict = checkLocked(ctx, w, held);
+      if (!conflict) {
+        slots.push(held);
+        applyLockedEffect(ctx, work, w, held);
+        continue;
+      }
+      conflicts.push(conflict);
+      warn(work, 'locked-slot-conflict', 'alert', w.start, w.slotId, `the locked slot could not be kept: ${conflict.message}. It was planned again.`);
+    }
     slots.push(planWindow(ctx, work, w));
   }
+  // A locked slot in the planned range that no window starts at any more.
+  for (const [start, held] of locked) {
+    if (start < input.from || start >= input.to) continue;
+    const c: LockConflict = { start, slotId: held.slotId, reason: 'window-changed', message: 'no slot of the schedule starts there any more' };
+    conflicts.push(c);
+    warn(work, 'locked-slot-conflict', 'alert', start, held.slotId, `the locked slot could not be kept: ${c.message}`);
+  }
   warnAboutUnmatchedExceptions(schedule, input.from, input.to, work);
-  return { slots, state: { rng: work.rng, sequences: work.sequences, bags: work.bags }, warnings: work.warnings };
+  return { slots, state: { rng: work.rng, sequences: work.sequences, bags: work.bags }, warnings: work.warnings, conflicts };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Locked slots: used as stored when the window and everything in it still holds.
+// ---------------------------------------------------------------------------------------------
+
+function checkLocked(ctx: Ctx, w: Window, held: PlannedSlot): LockConflict | undefined {
+  const fail = (reason: LockConflict['reason'], message: string): LockConflict => ({ start: held.start, slotId: held.slotId, reason, message });
+  if (held.slotId !== w.slotId || held.start !== w.start || held.end !== w.end) {
+    return fail('window-changed', `the slot's window is now ${w.slotId} from ${w.start} to ${w.end}`);
+  }
+  if (held.pool !== w.slot.pool) return fail('window-changed', `the slot now draws from pool ${w.slot.pool}, not ${held.pool}`);
+  if (held.exception !== (w.exception !== undefined)) return fail('window-changed', 'the exception for this slot was added or removed');
+  if (w.exception && !held.programs.every((p) => p === w.exception!.programId)) return fail('window-changed', 'the exception now plays a different program');
+  const reach = new Map<string, number>();
+  for (const it of held.items) {
+    if (it.kind === 'content') {
+      const p = ctx.library.programs[it.programId];
+      if (!p) return fail('program-gone', `program ${it.programId} is no longer in the library`);
+      reach.set(it.programId, Math.max(reach.get(it.programId) ?? 0, it.startOffset + it.duration));
+    } else if (it.kind === 'filler') {
+      const clip = (ctx.library.clips[it.list] ?? []).find((c) => c.id === it.clipId);
+      if (!clip) return fail('clip-gone', `clip ${it.clipId} is no longer in list ${it.list}`);
+      if (clip.duration !== it.duration) return fail('duration-changed', `clip ${it.clipId} now lasts ${clip.duration} ms, not ${it.duration}`);
+    }
+  }
+  for (const [id, end] of reach) {
+    const now = ctx.library.programs[id]!.duration;
+    if (now !== end) return fail('duration-changed', `program ${id} now lasts ${now} ms, not ${end}`);
+  }
+  return undefined;
+}
+
+/**
+ * What planning the slot would have done to the state, apart from the random generator: ordered shows
+ * advance, programs and clips are marked as drawn. The slot's own items are used as stored.
+ */
+function applyLockedEffect(ctx: Ctx, work: Work, w: Window, held: PlannedSlot): void {
+  const pool = ctx.schedule.pools[w.slot.pool]!;
+  if (held.exception) {
+    countExceptionPick(ctx, work, w, pool);
+  } else if (pool.order === 'shuffled') {
+    for (const id of held.programs) work.bags[poolKey(w.slot.pool)] = markDrawn(work.bags[poolKey(w.slot.pool)] ?? emptyBag(), id);
+  } else if (w.slot.link?.mode !== 'rerun' && pool.programs.length > 0) {
+    const key = sequenceKey(w.slot);
+    const seq = work.sequences[key] ?? { position: 0, history: 0 };
+    const n = held.programs.length;
+    work.sequences[key] = { position: (seq.position + n) % pool.programs.length, history: seq.history + n };
+  }
+  for (const it of held.items) {
+    if (it.kind === 'filler') work.bags[bagKey(it.list)] = markDrawn(work.bags[bagKey(it.list)] ?? emptyBag(), it.clipId);
+  }
 }
 
 interface Ctx {

@@ -364,6 +364,48 @@ describe('staging a range', () => {
   });
 });
 
+describe('locked staged slots', () => {
+  it('are committed exactly as staged, and are no longer staged afterwards', async () => {
+    const s = setup();
+    const id = s.store.channel('Test')!.id;
+    const edge = s.store.channel('Test')!.edge;
+    // Stage a few days just after the lineup, with a different seed than the worker will plan with.
+    const staged = await stageGenerate(s.deps, 'Test', { to: edge + 3 * DAY });
+    const lockedSlot = staged.kept[1]!;
+    s.store.setLocked('Test', lockedSlot.start, true);
+    const r = await topUp(s.deps, 'Test');
+    expect(r.action).toBe('appended');
+    expect(r.conflicts).toEqual([]);
+    expect(r.planned!.find((x) => x.start === lockedSlot.start)).toEqual(lockedSlot);
+    expect(s.store.stagedSlots(id).every((x) => x.start >= s.store.channel('Test')!.edge)).toBe(true);
+    expect(s.store.stagedSlots(id).find((x) => x.start === lockedSlot.start)).toBeUndefined();
+    // What reached Tunarr holds the locked slot's content, in order.
+    const contentIds = s.fake.lineup.filter((i) => i['type'] === 'content').map((i) => i['id']);
+    for (const p of lockedSlot.programs) expect(contentIds).toContain(p);
+  });
+
+  it('is planned again and noted in the commit log when it no longer fits', async () => {
+    const s = setup();
+    const edge = s.store.channel('Test')!.edge;
+    const staged = await stageGenerate(s.deps, 'Test', { to: edge + 2 * DAY });
+    const slot = staged.kept.find((k) => k.programs.length > 0)!;
+    s.store.setLocked('Test', slot.start, true);
+    // A program of the locked slot changes length in the library.
+    const id = slot.programs[0]!;
+    const movie = s.fake.data.movies.find((m) => m.id === id);
+    const ep = s.fake.data.shows[0]!.episodes.find((e) => e.id === id);
+    (movie ?? ep)!.duration += 1000;
+    const r = await topUp(s.deps, 'Test');
+    expect(r.action).toBe('appended');
+    expect(r.conflicts).toHaveLength(1);
+    expect(r.conflicts[0]).toMatchObject({ reason: 'duration-changed', start: slot.start });
+    const ch = s.store.channel('Test')!;
+    const commit = s.store.commits(ch.id)[0]!;
+    expect(commit.status).toBe('done');
+    expect(commit.note).toMatch(/locked slots that could not be kept/);
+  });
+});
+
 describe('resync', () => {
   it('adopts Tunarr\'s end after a change made outside DayTuner, so the worker can carry on', async () => {
     const s = setup();

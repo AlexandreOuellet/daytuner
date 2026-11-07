@@ -211,6 +211,18 @@ describe('the command line', () => {
     expect(said()).not.toContain('Nothing is staged');
     expect(fake.lineup).toHaveLength(before);
     out.length = 0;
+    expect(await run('stage', 'Test', 'lock', '2026-11-18T08:00')).toBe(0);
+    expect(said()).toContain('Locked the slot starting 2026-11-18 08:00');
+    out.length = 0;
+    await run('stage', 'Test', 'show');
+    expect(said()).toMatch(/2026-11-18 08:00 to [^\n]*\[locked\]/);
+    out.length = 0;
+    expect(await run('stage', 'Test', 'generate', '--to', '2026-11-20', '--keep', '2026-11-18..2026-11-20')).not.toBe(0);
+    expect(errs.join('\n')).toMatch(/locked/);
+    out.length = 0;
+    expect(await run('stage', 'Test', 'unlock', '2026-11-18T08:00')).toBe(0);
+    expect(await run('stage', 'Test', 'lock', '2026-11-18T08:07')).not.toBe(0);
+    out.length = 0;
     expect(await run('stage', 'Test', 'clear')).toBe(0);
     expect(said()).toMatch(/Cleared \d+ staged slot/);
     out.length = 0;

@@ -37,7 +37,7 @@ const USAGE = `Usage:
   daytuner channel set-schedule <name> <channel.yaml>      (saves a new revision)
   daytuner channel revisions <name> | diff <name> [from [to]] | rollback <name> <number>
   daytuner channel list | status <name> | commits <name> | adopt-history <name> [--yes] | resync <name> [--yes]
-  daytuner stage <name> generate --to DATE [--keep DATE..DATE] | show [--from DATE] [--to DATE] | clear [--from DATE] [--to DATE]
+  daytuner stage <name> generate --to DATE [--keep DATE..DATE] | show [--from DATE] [--to DATE] | lock DATETIME | unlock DATETIME | clear [--from DATE] [--to DATE]
                                         (dates are local to the channel: 2026-10-31 or 2026-10-31T20:00)
   daytuner run <name> [--yes]            (a dry run without --yes)
   daytuner cursor <name> list | rewind <sequence> <k> | set <sequence> <episode-number>
@@ -278,6 +278,15 @@ export async function runCli(argv: string[], io: CliEnv): Promise<number> {
         for (const s of slots) {
           io.out(`${inZone(s.start, zone)} to ${inZone(s.end, zone)}  ${s.slotId ? slotLabel(s.slotId) : 'added'} ${s.pool ?? ''}${s.locked ? '  [locked]' : ''}  ${s.planned.programs.length} program(s)`);
         }
+        store.close();
+        return 0;
+      }
+      if ((sub === 'lock' || sub === 'unlock') && rest[2]) {
+        const start = parseLocalDateTime(zone, rest[2]);
+        store.setLocked(name!, start, sub === 'lock');
+        io.out(sub === 'lock'
+          ? `Locked the slot starting ${inZone(start, zone)}. It will be committed exactly as it is staged; if it no longer fits when its time comes it is planned again and the commit log records why.`
+          : `Unlocked the slot starting ${inZone(start, zone)}. It is planned again at commit time.`);
         store.close();
         return 0;
       }

@@ -3,7 +3,7 @@
 // agree about where the lineup ends, and it records every commit so that a crash can be resolved.
 // Rules: docs/architecture.md, "Worker".
 
-import { adjustSequence, plan, type Clock, type CursorAdjustment, type PlannedSlot, type PlanWarning, type Schedule } from '@daytuner/engine';
+import { adjustSequence, plan, type Clock, type CursorAdjustment, type LockConflict, type PlannedSlot, type PlanWarning, type Schedule } from '@daytuner/engine';
 import { parseScheduleFile, resolveSchedule } from '@daytuner/schedule';
 import type { CommitRecord, Store } from '@daytuner/store';
 import { alignToGrid, appendVerified, toLineupItems, totalDuration, type LineupItem, type TunarrClient } from '@daytuner/tunarr-client';
@@ -48,6 +48,8 @@ export interface TopUpResult {
   /** What was planned (also for a dry run), for the metrics. */
   planned?: PlannedSlot[];
   warnings: PlanWarning[];
+  /** Locked staged slots that could not be kept as stored and were planned again. */
+  conflicts: LockConflict[];
 }
 
 const same = (a: number, b: number): boolean => Math.abs(a - b) <= EDGE_TOLERANCE_MS;
@@ -98,18 +100,19 @@ export async function topUp(deps: WorkerDeps, channelName: string, opts: TopUpOp
   }
 
   const ahead = edgeNow - now;
-  const base = { ...(recovered ? { recovered } : {}), aheadBefore: ahead, warnings: [] as PlanWarning[] };
+  const base = { ...(recovered ? { recovered } : {}), aheadBefore: ahead, warnings: [] as PlanWarning[], conflicts: [] as LockConflict[] };
   if (ahead >= ch.floorMs + ch.stepMs) return { action: 'none', ...base };
 
   const { schedule, library, fillerListIds } = await resolveSchedule(parseScheduleFile(ch.schedule), client);
   const { from, flex } = alignToGrid(edgeNow, schedule.grid);
-  const result = plan({ schedule, library, state: ch.state, from, to: now + ch.floorMs + ch.stepMs });
+  const locked = store.stagedSlots(ch.id, edgeNow).filter((s) => s.locked).map((s) => s.planned);
+  const result = plan({ schedule, library, state: ch.state, from, to: now + ch.floorMs + ch.stepMs, locked });
   if (result.slots.length === 0) return { action: 'none', ...base, warnings: result.warnings };
 
   const items: LineupItem[] = [...(flex > 0 ? [{ type: 'flex' as const, duration: flex }] : []), ...toLineupItems(result.slots, fillerListIds)];
   const totalMs = totalDuration(items);
   if (opts.dryRun) {
-    return { action: 'would-append', ...base, warnings: result.warnings, items: items.length, totalMs, slots: result.slots.length, planned: result.slots };
+    return { action: 'would-append', ...base, warnings: result.warnings, conflicts: result.conflicts, items: items.length, totalMs, slots: result.slots.length, planned: result.slots };
   }
 
   // Record the intent first, so a crash between here and the confirmation can be resolved later.
@@ -143,10 +146,14 @@ export async function topUp(deps: WorkerDeps, channelName: string, opts: TopUpOp
     throw new ConsistencyError(`Tunarr stored something different from what was sent (${what}). The commit stays pending; see \`channel commits ${channelName}\` and \`channel resync ${channelName}\`.`);
   }
   store.completeCommit(commit.id, report.edgeAfter, clock.now());
+  if (result.conflicts.length > 0) {
+    store.noteCommit(commit.id, `locked slots that could not be kept: ${result.conflicts.map((c) => `${c.slotId} at ${c.start} (${c.reason}: ${c.message})`).join('; ')}`);
+  }
   return {
     action: 'appended',
     ...base,
     warnings: result.warnings,
+    conflicts: result.conflicts,
     items: items.length,
     totalMs,
     slots: result.slots.length,

@@ -354,6 +354,8 @@ export class Store {
       if (c.status !== 'pending') throw new StoreError(`commit ${commitId} is ${c.status}, not pending`);
       this.db.prepare("update commits set status = 'done', finished_at = ? where id = ?").run(at, commitId);
       this.db.prepare('update channels set state = ?, edge = ? where id = ?').run(JSON.stringify(c.state), actualEdge, c.channelId);
+      // What was staged before the new end is now in Tunarr: it is no longer staged.
+      this.db.prepare('delete from staged_slots where channel_id = ? and start < ?').run(c.channelId, actualEdge);
     });
   }
 
@@ -433,6 +435,17 @@ export class Store {
           planned: JSON.parse(String(o['planned'])) as PlannedSlot, generatedAt: Number(o['generated_at']),
         };
       });
+  }
+
+  /**
+   * Locks or unlocks the staged slot that starts at `start`. A locked slot is committed as it is stored, and
+   * is not replaced by generating again.
+   */
+  setLocked(name: string, start: number, locked: boolean): void {
+    const ch = this.channel(name);
+    if (!ch) throw new StoreError(`no channel named "${name}"`);
+    const r = this.db.prepare('update staged_slots set locked = ? where channel_id = ? and start = ?').run(locked ? 1 : 0, ch.id, start);
+    if (Number(r.changes) === 0) throw new StoreError('no slot is staged starting then');
   }
 
   /** Removes staged slots that start inside `[from, to)`, locked ones too. Returns how many. */
