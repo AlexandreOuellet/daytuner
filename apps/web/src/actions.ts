@@ -4,11 +4,11 @@
 
 import type { Context, Hono } from 'hono';
 import type { Clock } from '@daytuner/engine';
-import { addIds, findProgram, parseLocalDateTime, parseScheduleFile, resolveSchedule } from '@daytuner/schedule';
+import { addIds, adSettingsOf, applyAdSettings, findProgram, parseLocalDateTime, parseScheduleFile, resolveSchedule, type AdSettings } from '@daytuner/schedule';
 import type { ChannelRecord, PinRecord, Store } from '@daytuner/store';
 import type { TunarrClient } from '@daytuner/tunarr-client';
 import {
-  adjustCursor, adoptHistory, addChannel, cachedSource, cursorPreview, listSequences, resync, revisionImpact, stageCheck, stageDiff, stageEdit, stageGenerate,
+  adSamples, adjustCursor, adoptHistory, addChannel, cachedSource, cursorPreview, listSequences, resync, revisionImpact, stageCheck, stageDiff, stageEdit, stageGenerate,
   runAndRecord, stageRefresh, stageReset, topUp, type StageEdit, type StageResult,
 } from '@daytuner/worker';
 import { Jobs } from './jobs.js';
@@ -188,18 +188,56 @@ export function registerActions(app: Hono, d: ActionDeps): void {
     return job(c, ch.name, 'check schedule', async () => revisionImpact(deps, ch.name, yaml));
   });
 
+  /** Saves a new revision unless locked staged slots would stop fitting (then only with `force`). */
+  const saveSchedule = async (ch: ChannelRecord, yaml: string, force: boolean) => {
+    await resolveSchedule(parseScheduleFile(yaml), cachedSource(d.client, d.store, d.clock));
+    const impact = yaml === ch.schedule ? undefined : await revisionImpact(deps, ch.name, yaml);
+    if (impact && impact.conflicts.length > 0 && !force) return { saved: false, revision: ch.revision, impact };
+    return { saved: true, revision: d.store.setSchedule(ch.name, yaml, d.clock.now()), ...(impact ? { impact } : {}) };
+  };
+
   app.post('/api/channels/:name/schedule', async (c) => {
     const ch = d.channel(c.req.param('name'));
     const b = await bodyOf(c);
     const yaml = needString(b, 'yaml');
     parseScheduleFile(yaml);
     const force = flag(b, 'force');
-    return job(c, ch.name, 'save schedule', async () => {
-      await resolveSchedule(parseScheduleFile(yaml), cachedSource(d.client, d.store, d.clock));
-      const impact = yaml === ch.schedule ? undefined : await revisionImpact(deps, ch.name, yaml);
-      if (impact && impact.conflicts.length > 0 && !force) return { saved: false, revision: ch.revision, impact };
-      return { saved: true, revision: d.store.setSchedule(ch.name, yaml, d.clock.now()), ...(impact ? { impact } : {}) };
-    });
+    return job(c, ch.name, 'save schedule', () => saveSchedule(ch, yaml, force));
+  });
+
+  /** The ad, bumper and filler settings as plain numbers, with the filler lists Tunarr has to choose from. */
+  app.get('/api/channels/:name/ads', async (c) => {
+    const ch = d.channel(c.req.param('name'));
+    return c.json({ revision: ch.revision, settings: adSettingsOf(parseScheduleFile(ch.schedule)), lists: await d.client.fillerLists() });
+  });
+
+  const settingsOf = (b: Body): AdSettings => {
+    const s = b['settings'] as AdSettings | undefined;
+    const num = (v: unknown): boolean => typeof v === 'number' && Number.isFinite(v) && v >= 0;
+    if (!s || typeof s !== 'object' || !num(s.step) || !s.ratio || !num(s.ratio.min) || !num(s.ratio.max) || s.ratio.max < s.ratio.min || typeof s.positions !== 'object' || typeof s.bumpers !== 'object') {
+      throw new BadRequest('"settings" must be the ad settings (step, ratio, positions, bumpers)');
+    }
+    return s;
+  };
+
+  app.post('/api/channels/:name/ads/sample', async (c) => {
+    const ch = d.channel(c.req.param('name'));
+    const settings = settingsOf(await bodyOf(c));
+    return job(c, ch.name, 'sample ads', async () => ({ samples: await adSamples(deps, ch.name, settings) }));
+  });
+
+  app.post('/api/channels/:name/ads', async (c) => {
+    const ch = d.channel(c.req.param('name'));
+    const b = await bodyOf(c);
+    const yaml = (() => {
+      try {
+        return applyAdSettings(ch.schedule, settingsOf(b));
+      } catch (e) {
+        throw e instanceof BadRequest ? e : new BadRequest(e instanceof Error ? e.message : String(e));
+      }
+    })();
+    const force = flag(b, 'force');
+    return job(c, ch.name, 'save ad settings', () => saveSchedule(ch, yaml, force));
   });
 
   app.post('/api/channels/:name/schedule/rollback', async (c) => {

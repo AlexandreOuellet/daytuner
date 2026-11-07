@@ -63,6 +63,7 @@ needs the server started with `DAYTUNER_ALLOW_WRITES=1`.
 | `GET .../cursors`, `POST .../cursors/preview`, `POST .../cursors/adjust` | `{ key, kind: rewind\|set, amount }` | the shows' places; job: what an adjustment would change (the next airings now and after, which are committed, staged or locked); job: move one and plan the staged slots again |
 | `POST .../run` | `{ dryRun? }` | job: plan, or commit when `dryRun` is `false` and writing is on |
 | `POST .../resync`, `/adopt-history` | `{ apply? }` | settle a pending commit or adopt Tunarr's end; set shows' places from the lineup (dry run unless `apply`) |
+| `GET .../ads`, `POST .../ads/sample`, `POST .../ads` | `{ settings }` / `{ settings, force? }` | the ad, bumper and filler settings as plain numbers with Tunarr's filler lists; job: plan a sample episode and movie with settings applied (saves nothing); job: save them as a new revision (refused over locked slots unless `force`) |
 | `GET .../export` | | the schedule with the library's ids beside every title |
 
 Errors are `{ "error": message }` with 400 (bad input), 403 (writing is off), 404 or 409 (the channel is busy: the running job is in the body).

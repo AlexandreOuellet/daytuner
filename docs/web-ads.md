@@ -31,6 +31,16 @@ made. This note is only about what the page shows and does.
   the ad share. A "more" section on each position opens the length range, the padding step and the mid-break rules
   (every N minutes, tail buffer, minimum gap, chapter types).
 
+## Built (`apps/ui/src/pages/Ads.tsx`)
+
+The page draws the block in order (head, before, during, after, tail) with what each holds; each box opens a simple editor (ads list,
+how long, bumper list) with a "More" for minimums, the mid-break rules and the step; then the ad share and the filler list. "Show a
+sample" plans a real episode and a real movie of the channel with the settings applied (`adSamples` in the worker): each is drawn to
+scale, piece by piece, with a legend, a table and the ad share. A sample is planned in the smallest slot the program fits in with its
+minimum ads (a grid step more if it does not fit), which is how it would look in a slot of that size; the page says when the settings
+have changed since the sample. The settings are written into the channel file's `ads`, `bumpers` and `interstitial` only
+(`applyAdSettings`), keeping the file's comments.
+
 ## How it saves
 
 It edits the `ads`, `bumpers` and `interstitial` sections of the channel's current schedule and saves a **new

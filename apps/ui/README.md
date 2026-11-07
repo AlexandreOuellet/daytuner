@@ -13,4 +13,6 @@ Built so far: the dashboard (a card per channel with its health), a channel page
 last commits and runs) and the cursors page (a card per ordered show: its next episode and airings, "missed a week", rewind by
 N and set to an episode, each previewed before it is applied). No login, no charting library: the trends are small SVG lines with a table view.
 
-To build: the ads page, the schedule designer, the staging editor (see `docs/status.md`).
+The ads page is built too (the block drawn in order, simple settings with a "More" on each, a real sample, and saving as a new revision).
+
+To build: the schedule designer, the staging editor (see `docs/status.md`).

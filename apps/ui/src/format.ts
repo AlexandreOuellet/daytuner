@@ -26,3 +26,9 @@ export function nameList(ids: readonly string[], titles: Readonly<Record<string,
   if (ids.length === 0) return 'nothing';
   return ids.slice(0, 2).map((id) => titles[id] ?? id).join(', ') + (ids.length > 2 ? ` (+${ids.length - 2})` : '');
 }
+
+/** 150000 is "2:30". */
+export const mmss = (ms: number): string => `${Math.floor(ms / 60_000)}:${String(Math.round((ms % 60_000) / 1000)).padStart(2, '0')}`;
+
+/** Minutes with at most one decimal: 90000 is "1.5". */
+export const minutes = (ms: number): string => String(Number((ms / 60_000).toFixed(1)));

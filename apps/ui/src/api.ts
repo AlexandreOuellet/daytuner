@@ -34,6 +34,26 @@ export interface CursorPreview {
 }
 export interface JobInfo<T = unknown> { id: string; channel: string; kind: string; state: 'running' | 'done' | 'failed'; message: string; result?: T }
 
+export type Edge = 'head' | 'pre' | 'post' | 'tail';
+export interface AdSettings {
+  step: number;
+  ratio: { min: number; max: number };
+  positions: Partial<Record<Edge, { list?: string; min: number; max: number }>>;
+  mid?: { list: string; every: number; min: number; max: number; tailBuffer: number; minGap?: number; chapterTypes?: string[] };
+  bumpers: Partial<Record<Edge, string>>;
+  interstitial?: string;
+}
+export interface FillerList { id: string; name: string; count: number }
+export interface SampleSegment { type: 'content' | 'ad' | 'bumper' | 'interstitial' | 'dead-air'; position: string; ms: number; list?: string }
+export interface AdSample {
+  kind: 'episode' | 'movie'; title: string; programMs: number; windowMs: number; segments: SampleSegment[];
+  adMs: number; adShare: number; midBreaks: number; deadAirMs: number; warnings: string[];
+}
+export interface SaveResult {
+  saved: boolean; revision: number;
+  impact?: { conflicts: { start: number; reason: string; message: string }[]; changes: unknown[]; staged: number };
+}
+
 export class ApiError extends Error {
   constructor(readonly status: number, message: string) {
     super(message);
@@ -80,5 +100,8 @@ export const api = {
     runJob<CursorPreview>(`/api/channels/${encodeURIComponent(name)}/cursors/preview`, { key, kind, amount }),
   adjustCursor: (name: string, key: string, kind: 'rewind' | 'set', amount: number) =>
     runJob<{ before: { position: number }; after: { position: number } }>(`/api/channels/${encodeURIComponent(name)}/cursors/adjust`, { key, kind, amount }),
+  ads: (name: string) => get<{ revision: number; settings: AdSettings; lists: FillerList[] }>(`/api/channels/${encodeURIComponent(name)}/ads`),
+  sampleAds: (name: string, settings: AdSettings) => runJob<{ samples: AdSample[] }>(`/api/channels/${encodeURIComponent(name)}/ads/sample`, { settings }),
+  saveAds: (name: string, settings: AdSettings, force = false) => runJob<SaveResult>(`/api/channels/${encodeURIComponent(name)}/ads`, { settings, force }),
   runs: (name: string) => get<Run[]>(`/api/channels/${encodeURIComponent(name)}/runs`),
 };

@@ -183,6 +183,32 @@ describe('actions', () => {
     expect((await t.post('/api/channels/Test/cursors/adjust', { key: 'seq:a', kind: 'spin', amount: 1 })).status).toBe(400);
   });
 
+  it('gives the ad settings with the filler lists, samples a change without saving, and saves it as a revision', async () => {
+    const ads = (await t.get('/api/channels/Test/ads')).body;
+    expect(ads.revision).toBe(1);
+    expect(ads.settings).toMatchObject({ step: 15_000, ratio: { min: 0.15, max: 0.6 }, interstitial: 'Fillers' });
+    expect(ads.lists.map((l: any) => [l.name, l.count])).toEqual([['Ads', 40], ['Fillers', 10]]);
+
+    const settings = { ...ads.settings, ratio: { min: 0.2, max: 0.5 }, bumpers: { pre: 'Fillers' } };
+    const sample = await t.job('/api/channels/Test/ads/sample', { settings });
+    expect(sample.state, sample.message).toBe('done');
+    const samples = (sample.result as any).samples;
+    expect(samples.map((x: any) => x.kind)).toEqual(['episode', 'movie']);
+    expect(samples[0].segments.some((g: any) => g.type === 'bumper' && g.position === 'pre')).toBe(true);
+    expect(t.store.channel('Test')!.revision).toBe(1); // a sample saves nothing
+
+    const saved = await t.job('/api/channels/Test/ads', { settings });
+    expect(saved.result).toMatchObject({ saved: true, revision: 2 });
+    expect((await t.get('/api/channels/Test/ads')).body.settings).toMatchObject({ ratio: { min: 0.2, max: 0.5 }, bumpers: { pre: 'Fillers' } });
+    const unchanged = await t.job('/api/channels/Test/ads', { settings: (await t.get('/api/channels/Test/ads')).body.settings });
+    expect(unchanged.result).toMatchObject({ saved: true, revision: 2 }); // nothing changed: no new revision
+
+    expect((await t.post('/api/channels/Test/ads', { settings: { nonsense: true } })).status).toBe(400);
+    expect((await t.post('/api/channels/Test/ads/sample', {})).status).toBe(400);
+    expect((await t.post('/api/channels/Test/ads', { settings: { ...settings, positions: { head: { min: 0, max: 60000 } } } })).status).toBe(400); // ads without a list
+    expect((await t.job('/api/channels/Test/ads', { settings: { ...settings, interstitial: 'Missing list' } })).state).toBe('failed');
+  });
+
   it('plans with a dry run, and will not write unless the server was started with writing on', async () => {
     const dry = await t.job('/api/channels/Test/run');
     expect(dry).toMatchObject({ state: 'done', result: { action: 'would-append' } });

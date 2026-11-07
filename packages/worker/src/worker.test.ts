@@ -4,6 +4,8 @@ import { Store } from '@daytuner/store';
 import { FakeTunarr, TunarrClient } from '@daytuner/tunarr-client';
 import { CHAPTER_CACHE_LIFETIME_MS } from './chapters.js';
 import { evaluateHealth } from './health.js';
+import { adSamples } from './adsample.js';
+import { adSettingsOf, parseScheduleFile } from '@daytuner/schedule';
 import { isDue, runAndRecord, scheduledInstant } from './scheduler.js';
 import { cursorPreview, stageReset, adjustCursor, adoptHistory, revisionImpact, stageCheck, stageDiff, stageEdit, stageGenerate, stageRefresh, ConsistencyError, listSequences, resync, topUp, type WorkerDeps } from './worker.js';
 
@@ -818,5 +820,36 @@ describe('previewing a cursor adjustment', () => {
 
   it('rejects an unknown sequence', async () => {
     await expect(cursorPreview(setup().deps, 'Test', 'seq:nope', { kind: 'rewind', by: 1 })).rejects.toThrow(/known: seq:a/);
+  });
+});
+
+
+describe('a sample of ad settings', () => {
+  const settingsOf = (s: ReturnType<typeof setup>) => adSettingsOf(parseScheduleFile(s.store.channel('Test')!.schedule));
+
+  it('plans a real episode and a real movie with the settings, without saving anything', async () => {
+    const s = setup();
+    const before = JSON.stringify([s.store.channel('Test'), s.store.stagedSlots(s.store.channel('Test')!.id)]);
+    const samples = await adSamples(s.deps, 'Test', settingsOf(s));
+    expect(samples.map((x) => x.kind)).toEqual(['episode', 'movie']);
+    for (const x of samples) {
+      expect(x.segments.reduce((a, g) => a + g.ms, 0)).toBe(x.windowMs);
+      expect(x.segments.filter((g) => g.type === 'content').reduce((a, g) => a + g.ms, 0)).toBe(x.programMs);
+      expect(x.adMs).toBeGreaterThan(0);
+      expect(x.adShare).toBeCloseTo(x.adMs / x.programMs, 6);
+      expect(x.midBreaks).toBeGreaterThan(0);
+    }
+    expect(samples[0]!.title).toMatch(/Show A S1E1/);
+    expect(JSON.stringify([s.store.channel('Test'), s.store.stagedSlots(s.store.channel('Test')!.id)])).toBe(before);
+  });
+
+  it('shows what a different setting does: no mid breaks means none, and a bumper appears where it is asked', async () => {
+    const s = setup();
+    const base = settingsOf(s);
+    const noMid = await adSamples(s.deps, 'Test', { ...base, mid: undefined } as typeof base);
+    expect(noMid[0]!.midBreaks).toBe(0);
+    const withBumper = await adSamples(s.deps, 'Test', { ...base, bumpers: { pre: 'Fillers' } });
+    expect(withBumper[0]!.segments.some((g) => g.type === 'bumper' && g.position === 'pre' && g.list === 'Fillers')).toBe(true);
+    await expect(adSamples(s.deps, 'Test', { ...base, interstitial: 'No such list' })).rejects.toThrow(/no filler list named/);
   });
 });
