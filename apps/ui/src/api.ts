@@ -54,6 +54,16 @@ export interface SaveResult {
   impact?: { conflicts: { start: number; reason: string; message: string }[]; changes: unknown[]; staged: number };
 }
 
+export interface SlotModel { day: number; at: number; pool: string; link?: string; linkMode?: 'continue' | 'rerun' }
+export interface PoolModel {
+  shows?: { show: string; id?: string }[];
+  movies?: { genre?: string; duration?: { op: '<=' | '<' | '>=' | '>' | '='; ms: number } };
+  order?: 'sequential' | 'shuffle';
+}
+export interface ScheduleModel { timezone: string; grid: number; week: SlotModel[]; pools: Record<string, PoolModel> }
+export interface PoolStats { count: number; durations: number[]; error?: string }
+export interface Library { shows: { id: string; title: string }[]; genres: string[] }
+
 export class ApiError extends Error {
   constructor(readonly status: number, message: string) {
     super(message);
@@ -103,5 +113,10 @@ export const api = {
   ads: (name: string) => get<{ revision: number; settings: AdSettings; lists: FillerList[] }>(`/api/channels/${encodeURIComponent(name)}/ads`),
   sampleAds: (name: string, settings: AdSettings) => runJob<{ samples: AdSample[] }>(`/api/channels/${encodeURIComponent(name)}/ads/sample`, { settings }),
   saveAds: (name: string, settings: AdSettings, force = false) => runJob<SaveResult>(`/api/channels/${encodeURIComponent(name)}/ads`, { settings, force }),
+  scheduleModel: (name: string) => get<{ revision: number; model: ScheduleModel }>(`/api/channels/${encodeURIComponent(name)}/schedule/model`),
+  library: () => get<Library>('/api/library'),
+  poolStats: (name: string, pools: Record<string, PoolModel>) => runJob<Record<string, PoolStats>>(`/api/channels/${encodeURIComponent(name)}/pools/stats`, { pools }),
+  saveModel: (name: string, model: Pick<ScheduleModel, 'week' | 'pools'>, force = false) =>
+    runJob<SaveResult>(`/api/channels/${encodeURIComponent(name)}/schedule/model`, { week: model.week, pools: model.pools, force }),
   runs: (name: string) => get<Run[]>(`/api/channels/${encodeURIComponent(name)}/runs`),
 };

@@ -15,4 +15,6 @@ N and set to an episode, each previewed before it is applied). No login, no char
 
 The ads page is built too (the block drawn in order, simple settings with a "More" on each, a real sample, and saving as a new revision).
 
-To build: the schedule designer, the staging editor (see `docs/status.md`).
+The schedule designer is built for the week and the pools (a week grid with drag, arrow keys and typing, a Pools panel with live counts, saved as a revision).
+
+To build: the calendar of special days, the staging editor (see `docs/status.md`).

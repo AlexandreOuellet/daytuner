@@ -50,6 +50,20 @@ after the days already committed have run out.
     34 movies match; 31 fit a 2h15 slot
   ```
 
+## Built (`apps/ui/src/pages/Schedule.tsx`, the week and the pools)
+
+The week grid draws a block per slot to scale (30 px an hour), coloured by pool, with the link as a chip; a slot that runs past
+midnight, or wraps round the week, is drawn faded and dashed where it carries on. A slot's start changes by dragging the handle on
+its top edge (snapped to the grid, kept one step clear of its neighbours), by the arrow keys on the focused block, or by typing the
+time in the editor under the grid. The editor also sets the pool and the link (`continues` or `reruns`, with a name), and removes
+the slot; a form adds one. Slots are never two at one moment or off the grid. A slot gets a note when it lasts over 12 hours or when
+no program of its pool is short enough for it. The Pools panel shows each pool's programs counted from the real library (and how many
+fit the shortest slot that uses it), adds and removes shows, sets a movie filter (genre and longest length), sets the order, adds a
+pool, and removes one no slot uses. Pools cannot be renamed yet.
+
+Saving applies the week and pools to the channel file (`applyScheduleModel`), keeping its comments, the ads and the special days, and
+is a new revision with the dry run against locked staged slots. Special days (the calendar) are the next piece of this page.
+
 ## How it saves
 
 Like every schedule edit: a new **revision** (with the diff and rollback), preceded by the dry run against locked staged

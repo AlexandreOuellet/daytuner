@@ -103,3 +103,26 @@ button.primary { background: var(--accent); color: var(--bg); border-color: var(
 .swatch.bumper { background: color-mix(in srgb, var(--ok) 55%, var(--surface)); }
 .swatch.interstitial { background: repeating-linear-gradient(45deg, var(--grid), var(--grid) 3px, var(--surface) 3px, var(--surface) 6px); }
 .swatch.dead-air { background: var(--ink-3); }
+
+.weekgrid { display: grid; grid-template-columns: 44px repeat(7, minmax(92px, 1fr)); gap: 4px; margin: 12px 0; overflow-x: auto; overflow-y: hidden; padding-bottom: 2px; }
+.weekgrid .dayhead { text-align: center; font-weight: 600; font-size: .85rem; padding: 4px 0; color: var(--ink-2); }
+.axis-body, .daycol { position: relative; }
+.axis-body span { position: absolute; right: 4px; font-size: .7rem; color: var(--ink-3); transform: translateY(-50%); }
+.daycol { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
+.hline { position: absolute; left: 0; right: 0; border-top: 1px solid var(--grid); }
+.slotblock { position: absolute; left: 2px; right: 2px; border-radius: 6px; overflow: hidden; border-left: 4px solid hsl(var(--h) 60% 45%); background: color-mix(in srgb, hsl(var(--h) 65% 50%) 26%, var(--surface)); }
+.slotblock.carry { opacity: .55; border-left-style: dashed; }
+.slotblock.picked { outline: 2px solid var(--accent); z-index: 2; }
+.slotbtn { all: unset; box-sizing: border-box; display: flex; flex-direction: column; gap: 1px; width: 100%; height: 100%; padding: 4px 6px 4px 6px; cursor: pointer; font-size: .75rem; line-height: 1.2; overflow: hidden; color: var(--ink); }
+.slotbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.slotbtn .when { color: var(--ink-2); } .slotbtn .chip { font-size: .68rem; align-self: flex-start; } .slotbtn .note { position: absolute; top: 2px; right: 6px; color: var(--warn); font-weight: 700; }
+.handle { position: absolute; top: 0; left: 0; right: 0; height: 8px; cursor: ns-resize; touch-action: none; background: linear-gradient(to bottom, color-mix(in srgb, var(--ink) 25%, transparent), transparent); }
+.row { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; }
+.pools { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: var(--gutter); }
+.poolcard { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; } .poolcard h3 { margin: 0; font-size: 1rem; }
+.poolcard header { width: 100%; display: flex; justify-content: space-between; align-items: center; }
+.chips { list-style: none; display: flex; flex-wrap: wrap; gap: 6px; padding: 0; margin: 0; }
+.chips .chip { display: inline-flex; align-items: center; gap: 4px; } .chips button { all: unset; cursor: pointer; padding: 0 2px; color: var(--ink-3); } .chips button:disabled { opacity: .3; cursor: default; }
+.poolcard fieldset { border: 0; padding: 0; margin: 0; } .poolcard label { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.poolcard input:not([type=radio]), .poolcard select, .editor input[type=time], .editor input:not([type]), .editor input[list] { font: inherit; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); }
+.poolcard input[type=number] { width: 6em; }

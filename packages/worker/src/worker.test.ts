@@ -5,6 +5,7 @@ import { FakeTunarr, TunarrClient } from '@daytuner/tunarr-client';
 import { CHAPTER_CACHE_LIFETIME_MS } from './chapters.js';
 import { evaluateHealth } from './health.js';
 import { adSamples } from './adsample.js';
+import { poolStats } from './poolstats.js';
 import { adSettingsOf, parseScheduleFile } from '@daytuner/schedule';
 import { isDue, runAndRecord, scheduledInstant } from './scheduler.js';
 import { cursorPreview, stageReset, adjustCursor, adoptHistory, revisionImpact, stageCheck, stageDiff, stageEdit, stageGenerate, stageRefresh, ConsistencyError, listSequences, resync, topUp, type WorkerDeps } from './worker.js';
@@ -851,5 +852,24 @@ describe('a sample of ad settings', () => {
     const withBumper = await adSamples(s.deps, 'Test', { ...base, bumpers: { pre: 'Fillers' } });
     expect(withBumper[0]!.segments.some((g) => g.type === 'bumper' && g.position === 'pre' && g.list === 'Fillers')).toBe(true);
     await expect(adSamples(s.deps, 'Test', { ...base, interstitial: 'No such list' })).rejects.toThrow(/no filler list named/);
+  });
+});
+
+
+describe('what a pool holds', () => {
+  it('counts the programs and lists their lengths, for pools that are not saved yet, and says what is wrong with one that cannot be read', async () => {
+    const s = setup();
+    const stats = await poolStats(s.deps.client, {
+      sitcoms: { shows: [{ show: 'Show A' }] },
+      comedies: { movies: { genre: 'Comedy', duration: { op: '<=', ms: 95 * MIN } } },
+      ghost: { shows: [{ show: 'Nope' }] },
+      none: { movies: { genre: 'Western' } },
+    });
+    expect(stats['sitcoms']!.count).toBe(400);
+    expect(stats['sitcoms']!.durations[0]).toBe(22 * MIN + 1000);
+    expect(stats['comedies']!.durations.every((d) => d <= 95 * MIN)).toBe(true);
+    expect(stats['comedies']!.durations).toEqual([...stats['comedies']!.durations].sort((a, b) => a - b));
+    expect(stats['ghost']).toMatchObject({ count: 0, error: expect.stringContaining('no show named "Nope"') });
+    expect(stats['none']).toEqual({ count: 0, durations: [] });
   });
 });

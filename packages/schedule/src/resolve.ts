@@ -3,7 +3,7 @@
 // The source is anything shaped like the Tunarr client, so tests can use a fake one.
 
 import type { AdPosition, Chapter, Library, Pool, Schedule, SlotDef } from '@daytuner/engine';
-import { DAY_NAMES, type ScheduleFile } from './file.js';
+import { DAY_NAMES, type PoolDef, type ScheduleFile } from './file.js';
 import { matchesFilter } from './units.js';
 
 export interface LibrarySource {
@@ -50,6 +50,76 @@ export function takeTurns<T>(lists: readonly (readonly T[])[]): T[] {
   return out;
 }
 
+export interface ResolvedPool {
+  ids: string[];
+  order: Pool['order'];
+  programs: Record<string, { duration: number }>;
+  titles: Record<string, string>;
+}
+
+/**
+ * Turns a pool definition (shows, or a movie filter) into the programs it holds, with their lengths and readable names.
+ * One resolver keeps the show and movie lists it reads, so resolving several pools reads each list once.
+ */
+export function makeLibraryReader(source: Pick<LibrarySource, 'movies' | 'shows' | 'episodes'>, notes: string[] = []): {
+  pool: (def: PoolDef) => Promise<ResolvedPool>;
+  episodesOfShow: (title: string, id?: string) => ReturnType<LibrarySource['episodes']>;
+  movies: () => ReturnType<LibrarySource['movies']>;
+} {
+  let showList: Awaited<ReturnType<LibrarySource['shows']>> | undefined;
+  let movieList: Awaited<ReturnType<LibrarySource['movies']>> | undefined;
+  const episodesOfShow = async (title: string, id?: string) => {
+    showList ??= await source.shows();
+    if (id !== undefined) {
+      const found = showList.find((s) => s.id === id);
+      if (!found) throw new ResolveError(`there is no show with id "${id}" (labelled "${title}")`);
+      if (!same(found.title, title)) notes.push(`the show with id "${id}" is now titled "${found.title}", the file labels it "${title}"`);
+      return source.episodes(found.id);
+    }
+    const matches = showList.filter((s) => same(s.title, title));
+    if (matches.length === 0) throw new ResolveError(`there is no show named "${title}"`);
+    if (matches.length > 1) {
+      throw new ResolveError(`there is more than one show named "${title}"; add an id: ${matches.map((m) => m.id).join(', ')}`);
+    }
+    return source.episodes(matches[0]!.id);
+  };
+  const movies = async () => (movieList ??= await source.movies());
+  const pool = async (def: PoolDef): Promise<ResolvedPool> => {
+    const programs: ResolvedPool['programs'] = {};
+    const titles: ResolvedPool['titles'] = {};
+    let ids: string[];
+    let order: Pool['order'];
+    if (def.shows) {
+      const perShow: string[][] = [];
+      for (const ref of def.shows) {
+        const { title, id } = typeof ref === 'string' ? { title: ref, id: undefined } : { title: ref.show, id: ref.id };
+        const eps = await episodesOfShow(title, id);
+        for (const e of eps) {
+          programs[e.id] = { duration: e.duration };
+          titles[e.id] = `${title} S${e.season}E${e.episode} "${e.title}"`;
+        }
+        perShow.push(eps.map((e) => e.id));
+      }
+      ids = takeTurns(perShow);
+      order = def.order === 'shuffle' ? 'shuffled' : 'ordered';
+    } else {
+      const m = def.movies!;
+      const all = await movies();
+      const chosen = all.filter(
+        (x) => (m.genre === undefined || x.genres.some((g) => same(g, m.genre!))) && (m.duration === undefined || matchesFilter(x.duration, m.duration)),
+      );
+      for (const x of chosen) {
+        programs[x.id] = { duration: x.duration };
+        titles[x.id] = x.title;
+      }
+      ids = chosen.map((x) => x.id);
+      order = def.order === 'sequential' ? 'ordered' : 'shuffled';
+    }
+    return { ids, order, programs, titles };
+  };
+  return { pool, episodesOfShow, movies };
+}
+
 export async function resolveSchedule(file: ScheduleFile, source: LibrarySource): Promise<Resolved> {
   const programs: Library['programs'] = {};
   const titles: Record<string, string> = {};
@@ -73,54 +143,15 @@ export async function resolveSchedule(file: ScheduleFile, source: LibrarySource)
   }
 
   // Pools.
-  let showList: Awaited<ReturnType<LibrarySource['shows']>> | undefined;
-  let movieList: Awaited<ReturnType<LibrarySource['movies']>> | undefined;
-  const episodesOfShow = async (title: string, id?: string) => {
-    showList ??= await source.shows();
-    if (id !== undefined) {
-      const found = showList.find((s) => s.id === id);
-      if (!found) throw new ResolveError(`there is no show with id "${id}" (labelled "${title}")`);
-      if (!same(found.title, title)) notes.push(`the show with id "${id}" is now titled "${found.title}", the file labels it "${title}"`);
-      return source.episodes(found.id);
-    }
-    const matches = showList.filter((s) => same(s.title, title));
-    if (matches.length === 0) throw new ResolveError(`there is no show named "${title}"`);
-    if (matches.length > 1) {
-      throw new ResolveError(`there is more than one show named "${title}"; add an id: ${matches.map((m) => m.id).join(', ')}`);
-    }
-    return source.episodes(matches[0]!.id);
-  };
-
+  const reader = makeLibraryReader(source, notes);
+  const resolvePool = reader.pool;
+  const episodesOfShow = reader.episodesOfShow;
   const pools: Record<string, Pool> = {};
   for (const [name, def] of Object.entries(file.pools)) {
-    let ids: string[];
-    let order: Pool['order'];
-    if (def.shows) {
-      const perShow: string[][] = [];
-      for (const ref of def.shows) {
-        const { title, id } = typeof ref === 'string' ? { title: ref, id: undefined } : { title: ref.show, id: ref.id };
-        const eps = await episodesOfShow(title, id);
-        for (const e of eps) {
-          programs[e.id] = { duration: e.duration };
-          titles[e.id] = `${title} S${e.season}E${e.episode} "${e.title}"`;
-        }
-        perShow.push(eps.map((e) => e.id));
-      }
-      ids = takeTurns(perShow);
-      order = def.order === 'shuffle' ? 'shuffled' : 'ordered';
-    } else {
-      movieList ??= await source.movies();
-      const m = def.movies!;
-      const chosen = movieList.filter(
-        (x) => (m.genre === undefined || x.genres.some((g) => same(g, m.genre!))) && (m.duration === undefined || matchesFilter(x.duration, m.duration)),
-      );
-      for (const x of chosen) {
-        programs[x.id] = { duration: x.duration };
-        titles[x.id] = x.title;
-      }
-      ids = chosen.map((x) => x.id);
-      order = def.order === 'sequential' ? 'ordered' : 'shuffled';
-    }
+    const r = await resolvePool(def);
+    Object.assign(programs, r.programs);
+    Object.assign(titles, r.titles);
+    const { ids, order } = r;
     if (ids.length === 0) throw new ResolveError(`pool "${name}" matches nothing in the library`);
     pools[name] = { order, programs: ids };
   }
@@ -137,7 +168,7 @@ export async function resolveSchedule(file: ScheduleFile, source: LibrarySource)
       titles[ep.id] = `${e.play.show} "${ep.title}"`;
       programId = ep.id;
     } else {
-      movieList ??= await source.movies();
+      const movieList = await reader.movies();
       const title = e.play.movie;
       const mv = e.play.id !== undefined ? movieList.find((x) => x.id === e.play.id) : movieList.find((x) => same(x.title, title));
       if (!mv) throw new ResolveError(e.play.id !== undefined ? `there is no movie with id "${e.play.id}" (labelled "${title}")` : `there is no movie titled "${title}"`);

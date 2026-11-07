@@ -4,11 +4,11 @@
 
 import type { Context, Hono } from 'hono';
 import type { Clock } from '@daytuner/engine';
-import { addIds, adSettingsOf, applyAdSettings, findProgram, parseLocalDateTime, parseScheduleFile, resolveSchedule, type AdSettings } from '@daytuner/schedule';
+import { addIds, adSettingsOf, applyAdSettings, applyScheduleModel, scheduleModelOf, type ScheduleModel, findProgram, parseLocalDateTime, parseScheduleFile, resolveSchedule, type AdSettings } from '@daytuner/schedule';
 import type { ChannelRecord, PinRecord, Store } from '@daytuner/store';
 import type { TunarrClient } from '@daytuner/tunarr-client';
 import {
-  adSamples, adjustCursor, adoptHistory, addChannel, cachedSource, cursorPreview, listSequences, resync, revisionImpact, stageCheck, stageDiff, stageEdit, stageGenerate,
+  adSamples, poolStats, adjustCursor, adoptHistory, addChannel, cachedSource, cursorPreview, listSequences, resync, revisionImpact, stageCheck, stageDiff, stageEdit, stageGenerate,
   runAndRecord, stageRefresh, stageReset, topUp, type StageEdit, type StageResult,
 } from '@daytuner/worker';
 import { Jobs } from './jobs.js';
@@ -203,6 +203,50 @@ export function registerActions(app: Hono, d: ActionDeps): void {
     parseScheduleFile(yaml);
     const force = flag(b, 'force');
     return job(c, ch.name, 'save schedule', () => saveSchedule(ch, yaml, force));
+  });
+
+  /** The week's slots and the pools, as plain data for the schedule designer. */
+  app.get('/api/channels/:name/schedule/model', (c) => {
+    const ch = d.channel(c.req.param('name'));
+    return c.json({ revision: ch.revision, model: scheduleModelOf(parseScheduleFile(ch.schedule)) });
+  });
+
+  /** Saves a changed week and pools as a new revision; with `check: true` only reports what it would do to locked staged slots. */
+  app.post('/api/channels/:name/schedule/model', async (c) => {
+    const ch = d.channel(c.req.param('name'));
+    const b = await bodyOf(c);
+    const m = b as unknown as Pick<ScheduleModel, 'week' | 'pools'>;
+    if (!Array.isArray(m.week) || typeof m.pools !== 'object' || m.pools === null) throw new BadRequest('the request needs "week" (a list of slots) and "pools"');
+    let yaml: string;
+    try {
+      yaml = applyScheduleModel(ch.schedule, m);
+    } catch (e) {
+      throw new BadRequest(e instanceof Error ? e.message : String(e));
+    }
+    const force = flag(b, 'force');
+    if (flag(b, 'check')) {
+      return job(c, ch.name, 'check schedule', async () => ({ saved: false, revision: ch.revision, impact: yaml === ch.schedule ? undefined : await revisionImpact(deps, ch.name, yaml) }));
+    }
+    return job(c, ch.name, 'save schedule', () => saveSchedule(ch, yaml, force));
+  });
+
+  /** What pools hold (how many programs, how long each), for pools that may not be saved yet. */
+  app.post('/api/channels/:name/pools/stats', async (c) => {
+    const ch = d.channel(c.req.param('name'));
+    const pools = (await bodyOf(c))['pools'];
+    if (typeof pools !== 'object' || pools === null || Array.isArray(pools)) throw new BadRequest('the request needs "pools"');
+    return job(c, ch.name, 'read pools', async () => poolStats(d.client, pools as Parameters<typeof poolStats>[1]));
+  });
+
+  /** The shows and movie genres the library has, for pickers. */
+  let libraryCache: { at: number; value: { shows: { id: string; title: string }[]; genres: string[] } } | undefined;
+  app.get('/api/library', async (c) => {
+    if (!libraryCache || d.clock.now() - libraryCache.at > 60_000) {
+      const [shows, movies] = await Promise.all([d.client.shows(), d.client.movies()]);
+      const genres = [...new Set(movies.flatMap((m) => m.genres))].sort((a, b) => a.localeCompare(b));
+      libraryCache = { at: d.clock.now(), value: { shows: shows.map((x) => ({ id: x.id, title: x.title })).sort((a, b) => a.title.localeCompare(b.title)), genres } };
+    }
+    return c.json(libraryCache.value);
   });
 
   /** The ad, bumper and filler settings as plain numbers, with the filler lists Tunarr has to choose from. */

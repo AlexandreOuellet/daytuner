@@ -209,6 +209,43 @@ describe('actions', () => {
     expect((await t.job('/api/channels/Test/ads', { settings: { ...settings, interstitial: 'Missing list' } })).state).toBe('failed');
   });
 
+  it('gives the week and pools as data, saves a changed week, and checks it against locked slots first', async () => {
+    const got = (await t.get('/api/channels/Test/schedule/model')).body;
+    expect(got.revision).toBe(1);
+    expect(got.model.week).toHaveLength(14);
+    expect(got.model.pools['sitcoms']).toMatchObject({ shows: [{ show: 'Show A' }] });
+
+    const edge = t.store.channel('Test')!.edge;
+    await t.job('/api/channels/Test/stage/generate', { to: edge + 4 * DAY });
+    const movie = (await t.get('/api/channels/Test/staged')).body.find((s: any) => s.pool === 'movies' && s.start > edge + 30 * MIN);
+    await t.post('/api/channels/Test/stage/lock', { start: movie.start, locked: true });
+    const week = got.model.week.map((s: any) => (s.pool === 'movies' ? { ...s, at: s.at + 3_600_000 } : s));
+
+    const check = await t.job('/api/channels/Test/schedule/model', { week, pools: got.model.pools, check: true });
+    expect((check.result as any).impact.conflicts.length).toBe(1);
+    expect(t.store.channel('Test')!.revision).toBe(1);
+    const refused = await t.job('/api/channels/Test/schedule/model', { week, pools: got.model.pools });
+    expect(refused.result).toMatchObject({ saved: false });
+    const saved = await t.job('/api/channels/Test/schedule/model', { week, pools: got.model.pools, force: true });
+    expect(saved.result).toMatchObject({ saved: true, revision: 2 });
+    expect((await t.get('/api/channels/Test/schedule/model')).body.model.week.find((s: any) => s.pool === 'movies').at).toBe(21 * 3_600_000);
+
+    expect((await t.post('/api/channels/Test/schedule/model', { week: [], pools: got.model.pools })).status).toBe(400);
+    expect((await t.post('/api/channels/Test/schedule/model', { week: [{ day: 1, at: 61_000, pool: 'movies' }], pools: got.model.pools })).status).toBe(400);
+    expect((await t.post('/api/channels/Test/schedule/model', {})).status).toBe(400);
+  });
+
+  it('reads what unsaved pools hold, and lists the shows and genres of the library', async () => {
+    const r = await t.job('/api/channels/Test/pools/stats', { pools: { mine: { shows: [{ show: 'Show A' }] }, odd: { movies: { genre: 'Comedy', duration: { op: '<=', ms: 90 * MIN } } } } });
+    expect(r.state, r.message).toBe('done');
+    const stats = r.result as any;
+    expect(stats.mine.count).toBe(300);
+    expect(stats.odd.durations.every((x: number) => x <= 90 * MIN)).toBe(true);
+    expect((await t.post('/api/channels/Test/pools/stats', {})).status).toBe(400);
+    const lib = (await t.get('/api/library')).body;
+    expect(lib).toEqual({ shows: [{ id: 'show-a', title: 'Show A' }], genres: ['Comedy'] });
+  });
+
   it('plans with a dry run, and will not write unless the server was started with writing on', async () => {
     const dry = await t.job('/api/channels/Test/run');
     expect(dry).toMatchObject({ state: 'done', result: { action: 'would-append' } });
