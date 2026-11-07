@@ -95,7 +95,7 @@ ffmpeg command line:
 | Filler lists | `GET /api/filler-lists`, then `GET /api/filler-lists/{id}/programs` | one entry per clip; its `duration` is fractional (for example `135732.245`) |
 | Movies, shows | `POST /api/programs/search` with a `type` filter, `page` and `limit` | movies carry `duration` and `genres`. **Pages count from 0**: page 1 skips the first `limit` results, and a `limit` at or above the total with page 1 returns nothing. Check the count against `totalHits` |
 | Episodes of a show | `GET /api/programs/{showId}/descendants` | each has `season.index` and `episodeNumber`; sort by those for the viewing order |
-| Chapters | `GET /api/programs/{id}/stream_details` | not on the other program endpoints, so one call per program (about 0.4 s). They are at `details.streamDetails.chapters`: `startTime` and `endTime` in milliseconds from the start of the program, and a `chapterType`. On the test copy about half the movies had none, the rest 5 to 34, all of type `chapter` and titled "Chapter N"; the last one ends at the program's duration |
+| Chapters | `GET /api/programs/{id}/stream_details` | not on the other program endpoints, so one call per program (about 0.4 s). They are at `details.streamDetails.chapters`: `startTime` and `endTime` in milliseconds from the start of the program, and a `chapterType`. On the test copy about half the movies had none, the rest 5 to 34, all of type `chapter` and titled "Chapter N"; the last one ends at the program's duration. Episodes: about a third of the 175 shows have none (for example Futurama, Brooklyn Nine-Nine, 30 Rock); sitcoms that have them usually carry 4 to 9 per episode, one-hour dramas 7 to 14, some mixed within one show |
 
 Item shapes in a stored lineup: `content` has `id`, `startOffsetMs` and `duration` (the length of
 that piece); `filler` has `id` (the clip), `fillerListId`, `fillerType` and `duration`; `flex` has
@@ -132,3 +132,10 @@ only when `TUNARR_URL` is set, and the integration tests in the client package o
 `GET /api/channels/{id}/programming` (the stored lineup), `GET /api/channels/{id}/now_playing`,
 `GET /api/channels/{id}/lineup?from=&to=` (the guide, which hides ad filler),
 `GET /api/smart_collections`, `POST /api/programs/search`.
+
+### Chapters on real episodes
+
+A 3-day plan of four shows on the test copy (Bob's Burgers, Community, Archer, Brooklyn Nine-Nine, 30-minute
+grid) used 72 episodes, 54 of them with chapters. It made 205 mid breaks. Every break inside an episode
+that has chapters (169 of them) sits exactly at a chapter end; the other 36 are in episodes with none (all
+of Brooklyn Nine-Nine and some others), and use the every-N-minutes offers.
