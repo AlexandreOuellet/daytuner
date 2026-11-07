@@ -208,3 +208,20 @@ variables or secrets.
   Channels managed here should be marked as such, and edited only here.
 - Tunarr is the source of truth for the library. If media moves, the plan is recomputed.
 - Never move a channel's start time. See [`tunarr-api.md`](tunarr-api.md).
+
+## Phase 4 storage (decided)
+
+- **Staged slots.** One row per planned slot, per channel, keyed by the slot's start instant:
+  channel, start, lock flag, pins (block index to program id) and the planned result. A slot is
+  addressed as "channel + start time". A pin or lock survives a schedule revision as long as a slot
+  still starts at that instant.
+- **Conflicts.** When a locked slot no longer fits at commit time, its pins are kept, the rest is
+  regenerated, and a conflict is recorded in the commit log with the reason (cursor moved, grid
+  changed, program gone). The preview shows it before the commit. Nothing blocks the worker, so the
+  floor is never missed.
+- **Revisions.** Each save stores the full YAML with a number and a time. The channel points at one
+  current revision. Rollback is picking an older number. A diff is a text diff of the YAML plus a diff
+  of the planned slots in the staged range.
+- **Revision and locks.** Saving a revision dry-runs it against the locked staged slots and lists
+  those that would no longer fit. The owner can save anyway (the conflicts are then recorded at commit)
+  or cancel.

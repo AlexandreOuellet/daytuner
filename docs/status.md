@@ -57,8 +57,9 @@ Settled this session and recorded under Decided in the roadmap: the exception fa
 
 - **Ad and bumper interface.** The model is decided. Open: how the web interface shows the positions plainly (phase 5).
 - **Mid-break offers** need refinement, deferred by the owner until later.
-- **Phase 4 design.** To be settled with the owner before any code: how staged slots are stored, how
-  pins and locks are addressed, what a conflict looks like, how revisions are diffed.
+- **Phase 4 design.** Storage, conflicts, revisions and the revision-versus-locks rule are decided (see
+  `architecture.md`, "Phase 4 storage"). Still to settle when building: how staging is shown in the CLI, and the
+  exact preview diff format.
 
 ## Known gaps
 
