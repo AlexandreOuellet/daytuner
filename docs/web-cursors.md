@@ -31,6 +31,13 @@ never anything already in Tunarr. Each one is logged.
   Applying also plans the show's staged slots again; locked slots keep their episode and are named in a warning. If the
   next week is already committed, the page suggests lowering the floor for that channel, so there is room to adjust.
 
+## Built (the page is `apps/ui/src/pages/Cursors.tsx`)
+
+The page lists a card per ordered show with its next episode, its slots and its next airings; "Missed a week" rewinds by the
+number of episodes the show plays in a week (the slots that continue it), a number field rewinds by N, and another sets an
+episode (numbered from 1). Each one shows the preview first, with Apply and Cancel. The card's airings load one after another,
+since a channel runs one job at a time.
+
 ## Built for this page
 
 - **A preview call** (`cursorPreview` in the worker, `POST .../cursors/preview`, and `cursor <name> preview <sequence> rewind|set <n>` in the CLI): for a sequence and an adjustment, the next airings of its slots, from the committed

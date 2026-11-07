@@ -2,6 +2,7 @@ import { api, type MetricsPoint } from '../api';
 import { StatusBadge } from '../components/Status';
 import { Trend, type TrendPoint } from '../components/Trend';
 import { clock, days, inZone, pct } from '../format';
+import { cursorsLink } from '../router';
 import { useLoad } from '../useLoad';
 
 const point = (zone: string, p: MetricsPoint, value: number): TrendPoint => ({ label: `commit ${p.commitId}, ${inZone(p.at, zone)}`, value });
@@ -24,6 +25,7 @@ export function Channel({ name }: { name: string }) {
         {health.data && <StatusBadge status={health.data.status} />}
       </div>
       {err && <p className="error" role="alert">{err}</p>}
+      <p><a href={cursorsLink(name)}>Where the shows are</a></p>
 
       {detail.data && (
         <p className="muted">

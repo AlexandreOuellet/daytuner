@@ -1,14 +1,17 @@
 // A tiny hash router: "#/" is the dashboard, "#/channel/NAME" a channel. No library for two pages.
 import { useEffect, useState } from 'react';
 
-export type Route = { page: 'dashboard' } | { page: 'channel'; name: string };
+export type Route = { page: 'dashboard' } | { page: 'channel'; name: string } | { page: 'cursors'; name: string };
 
 export function parseRoute(hash: string): Route {
+  const c = /^#\/channel\/(.+)\/cursors$/.exec(hash);
+  if (c) return { page: 'cursors', name: decodeURIComponent(c[1]!) };
   const m = /^#\/channel\/(.+)$/.exec(hash);
   return m ? { page: 'channel', name: decodeURIComponent(m[1]!) } : { page: 'dashboard' };
 }
 
 export const channelLink = (name: string): string => `#/channel/${encodeURIComponent(name)}`;
+export const cursorsLink = (name: string): string => `#/channel/${encodeURIComponent(name)}/cursors`;
 
 export function useRoute(): Route {
   const [route, setRoute] = useState<Route>(() => parseRoute(window.location.hash));

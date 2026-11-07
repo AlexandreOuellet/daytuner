@@ -166,7 +166,8 @@ describe('actions', () => {
   it('lists the shows\' places and adjusts one', async () => {
     const list = (await t.get('/api/channels/Test/cursors')).body;
     expect(list).toHaveLength(1);
-    expect(list[0]).toMatchObject({ key: 'seq:a', pool: 'sitcoms', position: 0, next: { programId: 'ep1' } });
+    expect(list[0]).toMatchObject({ key: 'seq:a', pool: 'sitcoms', position: 0, next: { programId: 'ep1' }, perWeek: 7 });
+    expect(list[0].slotInfo[0]).toEqual({ id: expect.stringMatching(/^\d@/), mode: 'continue' });
     const edge = t.store.channel('Test')!.edge;
     await t.job('/api/channels/Test/stage/generate', { to: edge + 3 * DAY });
     const set = await t.job('/api/channels/Test/cursors/adjust', { key: 'seq:a', kind: 'set', amount: 10 });

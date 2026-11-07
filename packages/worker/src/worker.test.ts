@@ -795,6 +795,7 @@ describe('previewing a cursor adjustment', () => {
     expect(first.kind).toBe('continue');
     expect(first.before[0]).toBe('ep11');
     expect(first.after[0]).toBe('ep9');
+    expect(p.next).toEqual({ before: 'ep11', after: 'ep9' });
     expect(first.staged).toBe(false);
     expect(p.titles['ep9']).toBe('Show A S1E9 "Ep 9"');
     expect(s.store.channel('Test')!.state.sequences['seq:a']).toEqual({ position: 10, history: 10 }); // the preview moved nothing

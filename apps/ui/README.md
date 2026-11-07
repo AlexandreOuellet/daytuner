@@ -9,7 +9,8 @@ pnpm --filter @daytuner/ui dev       # a dev server that forwards /api to a runn
 pnpm --filter @daytuner/ui test
 ```
 
-Built so far: the dashboard (a card per channel with its health) and a channel page (checks, trends over the commits, the
-last commits and runs). No login, no charting library: the trends are small SVG lines with a table view.
+Built so far: the dashboard (a card per channel with its health), a channel page (checks, trends over the commits, the
+last commits and runs) and the cursors page (a card per ordered show: its next episode and airings, "missed a week", rewind by
+N and set to an episode, each previewed before it is applied). No login, no charting library: the trends are small SVG lines with a table view.
 
-To build: the cursors page, the ads page, the schedule designer, the staging editor (see `docs/status.md`).
+To build: the ads page, the schedule designer, the staging editor (see `docs/status.md`).

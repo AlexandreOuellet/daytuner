@@ -1,5 +1,6 @@
 import { api } from './api';
 import { Channel } from './pages/Channel';
+import { Cursors } from './pages/Cursors';
 import { Dashboard } from './pages/Dashboard';
 import { useRoute } from './router';
 import { useLoad } from './useLoad';
@@ -20,7 +21,7 @@ export function App() {
       </header>
       <main>
         {server.error && <p className="error" role="alert">Cannot reach the DayTuner server: {server.error}</p>}
-        {route.page === 'dashboard' ? <Dashboard /> : <Channel name={route.name} />}
+        {route.page === 'dashboard' ? <Dashboard /> : route.page === 'cursors' ? <Cursors name={route.name} /> : <Channel name={route.name} />}
       </main>
     </>
   );

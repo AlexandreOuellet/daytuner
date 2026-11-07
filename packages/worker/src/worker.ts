@@ -672,6 +672,8 @@ export interface CursorPreview {
   after: { position: number; history: number };
   /** Everything before this is already committed to Tunarr and stays as it is. */
   committedUntil: number;
+  /** The episode that is next up now, and after the adjustment (program ids; titles are in `titles`). */
+  next: { before: string | undefined; after: string | undefined };
   airings: CursorAiring[];
   titles: Record<string, string>;
 }
@@ -712,7 +714,7 @@ export async function cursorPreview(
     const row = staged.get(slot.start);
     airings.push({ start: slot.start, slotId: slot.slotId, kind: modeOf(slot.slotId), before: was && was.start === slot.start ? unpinned(was) : [], after: unpinned(slot), staged: row !== undefined, locked: row?.locked === true });
   });
-  return { key: sequenceKey, pool: info.pool, length: info.length, before, after, committedUntil: ch.edge, airings: airings.slice(0, opts.count ?? 6), titles };
+  return { key: sequenceKey, pool: info.pool, length: info.length, before, after, committedUntil: ch.edge, next: { before: schedule.pools[info.pool]!.programs[before.position], after: schedule.pools[info.pool]!.programs[after.position] }, airings: airings.slice(0, opts.count ?? 6), titles };
 }
 
 /**

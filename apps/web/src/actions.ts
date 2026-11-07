@@ -218,7 +218,10 @@ export function registerActions(app: Hono, d: ActionDeps): void {
       listSequences(schedule).map((s) => {
         const st = ch.state.sequences[s.key] ?? { position: 0, history: 0 };
         const id = schedule.pools[s.pool]!.programs[st.position];
-        return { key: s.key, pool: s.pool, length: s.length, slots: s.slots, position: st.position, history: st.history, next: id ? { programId: id, title: titles[id] ?? id } : null };
+        const slotInfo = s.slots.map((slot) => ({ id: slot, mode: schedule.week.find((w) => `${w.day}@${w.at}` === slot)?.link?.mode === 'rerun' ? ('rerun' as const) : ('continue' as const) }));
+        // The episodes it plays in a week: what "missed a week" rewinds by. A rerun replays, so it does not count.
+        const perWeek = slotInfo.filter((x) => x.mode === 'continue').length;
+        return { key: s.key, pool: s.pool, length: s.length, slots: s.slots, slotInfo, perWeek, position: st.position, history: st.history, next: id ? { programId: id, title: titles[id] ?? id } : null };
       }),
     );
   });

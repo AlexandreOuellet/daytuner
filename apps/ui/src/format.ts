@@ -11,3 +11,18 @@ export function inZone(ms: number, zone: string): string {
 }
 
 export const clock = (minutes: number): string => `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
+
+const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+/** `1@72000000` is "Mon 20:00". */
+export function slotLabel(slotId: string): string {
+  const [day, at] = slotId.split('@').map(Number);
+  if (day === undefined || at === undefined || Number.isNaN(day) || Number.isNaN(at) || day < 0) return slotId;
+  return `${DAY_NAMES[day] ?? day} ${clock(Math.floor(at / 60_000))}`;
+}
+
+/** Up to two names, then "(+N)". */
+export function nameList(ids: readonly string[], titles: Readonly<Record<string, string>>): string {
+  if (ids.length === 0) return 'nothing';
+  return ids.slice(0, 2).map((id) => titles[id] ?? id).join(', ') + (ids.length > 2 ? ` (+${ids.length - 2})` : '');
+}

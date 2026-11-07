@@ -61,3 +61,14 @@ button:disabled { opacity: .6; cursor: default; }
 .tip { position: absolute; top: 0; transform: translate(-50%, -100%); background: var(--ink); color: var(--bg); border-radius: 6px; padding: 4px 8px; font-size: .8rem; display: flex; flex-direction: column; pointer-events: none; white-space: nowrap; }
 .trend details { margin-top: 6px; font-size: .85rem; } .trend table { width: 100%; border-collapse: collapse; } .trend th, .trend td { text-align: left; padding: 2px 4px; border-bottom: 1px solid var(--line); }
 @media (max-width: 520px) { .top { gap: 10px; flex-wrap: wrap; } .numbers { grid-template-columns: 1fr 1fr; } }
+
+.card.cursor h3 { font-size: .9rem; margin: 10px 0 4px; color: var(--ink-2); }
+.next { margin: 6px 0 2px; }
+.airings { list-style: none; padding: 0; margin: 0; font-size: .9rem; }
+.airings li { padding: 3px 0; display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
+.airings .when { color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.controls { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin: 10px 0 4px; }
+.controls input { width: 4.5em; font: inherit; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); }
+button.primary { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+.preview { border-top: 1px solid var(--line); margin-top: 10px; padding-top: 8px; }
+.ok-note { color: var(--ok); background: var(--ok-bg); padding: 6px 10px; border-radius: 8px; }
