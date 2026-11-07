@@ -7,6 +7,9 @@ and the page designs it links to. A Hono server on the same engine, schedule, st
 pnpm --filter @daytuner/web start
 ```
 
+The server also serves the pages (`apps/ui`, built with `pnpm --filter @daytuner/ui build`) from `DAYTUNER_UI_DIR`
+(default `apps/ui/dist`); without a build it serves only the API.
+
 Configuration is from the environment: `DAYTUNER_DB` (default `state/daytuner.db`), `DAYTUNER_HOST` (default `127.0.0.1`, so
 only this machine can reach it), `DAYTUNER_PORT` (default 8420), `DAYTUNER_ALLOW_WRITES=1` (default off: read only) and
 `TUNARR_URL`. There is no login: only expose it to people who may change your lineups.

@@ -1,6 +1,8 @@
 // The HTTP API. A thin layer over the same functions the command line calls, so the two cannot disagree. This
 // Writing to Tunarr stays off unless the server is started with it switched on (see actions.ts).
 
+import { existsSync, readFileSync, statSync } from 'node:fs';
+import { extname, join, normalize, resolve, sep } from 'node:path';
 import { Hono } from 'hono';
 import type { Clock } from '@daytuner/engine';
 import { diffLines, parseScheduleFile, ScheduleFileError } from '@daytuner/schedule';
@@ -19,9 +21,16 @@ export interface AppDeps {
   /** Writes to Tunarr: given only when the server was started with writing switched on. */
   writeClient?: TunarrClient;
   jobs?: Jobs;
+  /** The built pages (apps/ui/dist). When given, the server also serves them. */
+  uiDir?: string;
 }
 
 class NotFound extends Error {}
+
+const TYPES: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml',
+  '.json': 'application/json; charset=utf-8', '.png': 'image/png', '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.map': 'application/json',
+};
 
 export const VERSION = '0.0.0';
 
@@ -177,6 +186,23 @@ export function createApp(deps: AppDeps): Hono {
   });
 
   registerActions(app, { store, clock, jobs, client: deps.client, ...(deps.writeClient ? { writeClient: deps.writeClient } : {}), channel });
+
+  if (deps.uiDir) {
+    const root = resolve(deps.uiDir);
+    // The pages: a file that exists under the folder, or index.html for any other path (the app routes itself).
+    app.get('*', (c) => {
+      const path = c.req.path;
+      if (path.startsWith('/api/')) return c.json({ error: 'not found' }, 404);
+      const wanted = resolve(join(root, normalize(decodeURIComponent(path))));
+      const file = wanted.startsWith(root + sep) && existsSync(wanted) && statSync(wanted).isFile() ? wanted : join(root, 'index.html');
+      if (!existsSync(file)) return c.json({ error: 'the pages are not built (run: pnpm --filter @daytuner/ui build)' }, 404);
+      const immutable = file.includes(`${sep}assets${sep}`);
+      return c.body(readFileSync(file), 200, {
+        'content-type': TYPES[extname(file)] ?? 'application/octet-stream',
+        'cache-control': immutable ? 'public, max-age=31536000, immutable' : 'no-cache',
+      });
+    });
+  }
 
   return app;
 }

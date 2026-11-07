@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { emptyPlanState, type PlannedSlot } from '@daytuner/engine';
 import { Store } from '@daytuner/store';
@@ -123,5 +124,37 @@ describe('the API', () => {
       store.completeCommit(c.id, ch.edge + (i + 1) * 1000, i);
     }
     expect((await get('/api/channels/funny/commits')).body.map((c: any) => c.items)).toEqual([2, 1]);
+  });
+});
+
+describe('serving the pages', () => {
+  it('serves files from the built folder, index.html for other paths, and keeps /api for the API', async () => {
+    const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const dir = mkdtempSync(join(tmpdir(), 'daytuner-ui-'));
+    try {
+      mkdirSync(join(dir, 'assets'));
+      writeFileSync(join(dir, 'index.html'), '<title>DayTuner</title>');
+      writeFileSync(join(dir, 'assets', 'app.js'), 'console.log(1)');
+      writeFileSync(join(dirname(dir), 'secret.txt'), 'nope');
+      const store = Store.open(':memory:');
+      const app = createApp({ store, clock: { now: () => NOW }, client: new TunarrClient('http://tunarr.test', () => { throw new Error('none'); }), uiDir: dir });
+      const index = await app.request('/');
+      expect(index.status).toBe(200);
+      expect(index.headers.get('content-type')).toContain('text/html');
+      expect(await index.text()).toContain('DayTuner');
+      const js = await app.request('/assets/app.js');
+      expect(js.headers.get('content-type')).toContain('javascript');
+      expect(js.headers.get('cache-control')).toContain('immutable');
+      expect(await (await app.request('/channel/anything')).text()).toContain('DayTuner'); // the app routes itself
+      expect((await app.request('/api/nothing')).status).toBe(404);
+      expect((await app.request('/api/health')).status).toBe(200);
+      const escape = await app.request('/..%2Fsecret.txt');
+      expect(await escape.text()).not.toContain('nope'); // cannot read outside the folder
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(join(dirname(dir), 'secret.txt'), { force: true });
+    }
   });
 });

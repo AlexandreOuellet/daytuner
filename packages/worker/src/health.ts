@@ -32,7 +32,7 @@ export function evaluateHealth(input: {
   const checks: HealthCheck[] = [];
   const check = (name: string, ok: boolean, detail: string): void => void checks.push({ name, ok, detail });
 
-  check('Committed ahead', aheadMs >= ch.floorMs, `committed ${days(aheadMs)} ahead (the floor is ${days(ch.floorMs)})`);
+  check('Committed ahead', aheadMs >= ch.floorMs, `${days(aheadMs)} ahead (the floor is ${days(ch.floorMs)})`);
   if (lastRun) {
     const bad = lastRun.outcome === 'refused' || lastRun.outcome === 'failed';
     check('Last run', !bad, bad ? `the last run ${lastRun.outcome}: ${lastRun.message}` : `the last run: ${lastRun.outcome}`);
