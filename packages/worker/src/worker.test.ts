@@ -792,6 +792,18 @@ describe('the preview diff', () => {
     await expect(stageRerun(s.deps, 'Test', { start: slot.slot.start, block: 1, pool: 'sitcoms', programId: 'ep1' })).rejects.toThrow(/first episode/);
   });
 
+  it('a rerun is refused when the page names a program the block does not play (the page is out of date), pinning nothing', async () => {
+    const s = await staged();
+    const edge = s.store.channel('Test')!.edge;
+    const view = await calendarPlan(s.deps, 'Test', { from: edge, to: edge + 8 * DAY });
+    const sit = view.slots.filter((x) => x.source === 'staged' && x.slot.pool === 'sitcoms' && x.slot.blocks.length >= 2);
+    const slot = sit[0]!;
+    const other = sit[1]!.slot.blocks[0]!.programId; // a later episode: block 2 of this slot does not play it
+    await expect(stageRerun(s.deps, 'Test', { start: slot.slot.start, block: 2, pool: 'sitcoms', programId: other })).rejects.toThrow(/plays something else now/);
+    const after = await calendarPlan(s.deps, 'Test', { from: edge, to: edge + 8 * DAY });
+    expect(after.slots.find((x) => x.slot.start === slot.slot.start)!.slot.blocks.some((b) => b.pinned)).toBe(false);
+  });
+
   it('a block rerun is offered only in a pool of one show: with turns between shows it would upset them', () => {
     const titles = { a1: 'TNG S1E1 "x"', b1: 'Lower Decks S1E1 "y"', a2: 'TNG S1E2 "x"', b2: 'Lower Decks S1E2 "y"', a3: 'TNG S1E3 "x"' };
     const mixed = { order: 'ordered' as const, programs: ['a1', 'b1', 'a2', 'b2', 'a3'] };
@@ -1285,6 +1297,25 @@ describe('the grid and the time zone', () => {
     expect(originOf(1000, true, grid, 10 * DAY + 7 * MIN)).toEqual({ from: 10 * DAY, flex: 10 * DAY - 1000 });
     expect(originOf(1000, false, grid, 10 * DAY + 7 * MIN)).toEqual({ from: grid, flex: grid - 1000 });
     expect(originOf(10 * DAY + 3 * MIN, true, grid, 10 * DAY + 7 * MIN)).toEqual({ from: 10 * DAY + grid, flex: grid - 3 * MIN });
+  });
+});
+
+describe('checking and saving a schedule', () => {
+  it('reads the library once for a check and the save of the same text that follows it (the page does both)', async () => {
+    const s = setup();
+    const yaml = `${YAML}\n# edit ${Math.random()}\n`; // a text no earlier test has resolved
+    const count = () => s.fake.requests.length;
+    const a0 = count();
+    await revisionImpact(s.deps, 'Test', yaml); // the check
+    const first = count() - a0;
+    expect(first).toBeGreaterThan(0);
+    const b0 = count();
+    await revisionImpact(s.deps, 'Test', yaml); // what the save runs
+    expect(count() - b0).toBe(0);
+    s.clock.t += 31 * MIN; // after half an hour the library is read again
+    const c0 = count();
+    await revisionImpact(s.deps, 'Test', yaml);
+    expect(count() - c0).toBeGreaterThan(0);
   });
 });
 

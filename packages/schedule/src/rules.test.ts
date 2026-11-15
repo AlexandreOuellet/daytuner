@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseScheduleFile } from './file.js';
 import { makeLibraryReader, ResolveError, type LibrarySource } from './resolve.js';
+import { languageVariants } from './languages.js';
 
 const ep = (id: string, season: number, episode: number, minutes = 22, aired?: number) => ({ id, title: id, duration: minutes * 60_000, season, episode, ...(aired !== undefined ? { aired } : {}) });
 
@@ -45,6 +46,19 @@ const pool = (yaml: string) => {
   return f.pools['p']!;
 };
 const resolve = async (yaml: string) => makeLibraryReader(source()).pool(pool(yaml));
+
+describe('language codes', () => {
+  it('asks the library for both spellings of a code that has two (fra and fre), so either library matches', async () => {
+    asked.length = 0;
+    await resolve('movies: { audio: French }');
+    expect(asked.find((a) => a.startsWith('movie:audio'))).toBe('movie:audio:fra,fre');
+    asked.length = 0;
+    await resolve('movies: { subtitles: [ger, eng] }');
+    expect(asked.find((a) => a.startsWith('movie:subtitles'))).toBe('movie:subtitles:deu,ger,eng');
+    expect(languageVariants('eng')).toEqual(['eng']);
+    expect(languageVariants('CHI')).toEqual(['zho', 'chi']);
+  });
+});
 
 describe('movie rules', () => {
   it('keeps the old genre and length filter working', async () => {

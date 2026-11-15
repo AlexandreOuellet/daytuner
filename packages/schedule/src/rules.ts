@@ -3,6 +3,7 @@
 // subtitle languages). See docs/pool-rules.md.
 
 import type { MovieRule, ShowRule, YearSpan } from './file.js';
+import { languageVariants } from './languages.js';
 import { matchesFilter } from './units.js';
 
 export interface RuleMovie {
@@ -69,8 +70,8 @@ type Common = ShowRule | MovieRule;
 async function remoteSets(rule: Common, kind: 'movie' | 'show', look: Lookup, genreInIndex: boolean): Promise<Set<string>[]> {
   const sets: Set<string>[] = [];
   if (rule.genre && genreInIndex) sets.push(await look(kind, 'genre', rule.genre));
-  if (rule.audio) sets.push(await look(kind, 'audio', rule.audio));
-  if (rule.subtitles) sets.push(await look(kind, 'subtitles', rule.subtitles));
+  if (rule.audio) sets.push(await look(kind, 'audio', [...new Set(rule.audio.flatMap(languageVariants))]));
+  if (rule.subtitles) sets.push(await look(kind, 'subtitles', [...new Set(rule.subtitles.flatMap(languageVariants))]));
   return sets;
 }
 

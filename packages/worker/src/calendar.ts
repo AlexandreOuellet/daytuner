@@ -9,6 +9,7 @@ import { adSettingsOf, parseScheduleFile, resolveSchedule } from '@daytuner/sche
 import type { StagedSlotRecord } from '@daytuner/store';
 import type { TunarrClient } from '@daytuner/tunarr-client';
 import { cachedSource } from './chapters.js';
+import { resolveCached } from './resolvecache.js';
 import { ConsistencyError, planOrigin, stagedInputs, stageRefresh, type StageResult, type WorkerDeps } from './worker.js';
 
 /**
@@ -55,28 +56,6 @@ export interface CommittedBlock {
   totals: SlotTotals;
 }
 
-type Resolved = Awaited<ReturnType<typeof resolveSchedule>>;
-
-/**
- * The schedule resolved against the library (a read of every movie, show and episode: seconds), kept for a while and shared by
- * requests made together. The key is the channel's Tunarr id and its schedule text, so a saved schedule is read again.
- */
-const resolved = new Map<string, { at: number; value: Promise<Resolved> }>();
-const RESOLVE_KEEP_MS = 30 * 60_000;
-
-async function resolveCached(deps: Pick<WorkerDeps, 'store' | 'client' | 'clock'>, ch: { tunarrId: string; schedule: string }): Promise<Resolved> {
-  const key = `${ch.tunarrId}\u0000${ch.schedule}`;
-  const now = deps.clock.now();
-  let held = resolved.get(key);
-  if (!held || now - held.at > RESOLVE_KEEP_MS) {
-    held = { at: now, value: resolveSchedule(parseScheduleFile(ch.schedule), cachedSource(deps.client, deps.store, deps.clock)) };
-    resolved.set(key, held);
-    held.value.catch(() => resolved.delete(key));
-  }
-  const r = await held.value;
-  // The planner and the staged inputs add to these (a pinned program, its title): hand out copies.
-  return { ...r, library: { programs: { ...r.library.programs }, clips: r.library.clips }, titles: { ...r.titles } };
-}
 
 /** Plans from the committed edge, kept per set of inputs: a later week extends an earlier one instead of planning it all again. */
 const planned = new Map<string, { to: number; fresh: PlanResult; shaped: PlanResult }>();
@@ -168,7 +147,7 @@ export async function calendarPlan(deps: Pick<WorkerDeps, 'store' | 'client' | '
   const poolOf = new Map<string, string>();
   for (const [pool, def] of Object.entries(schedule.pools)) for (const id of def.programs) if (!poolOf.has(id)) poolOf.set(id, pool);
   const committed = runsOf(await committedIn(client, ch, range), poolOf);
-  if (to <= edge) return { committedUntil: edge, from: range.from, to, committed, slots: [], titles, clips: await clipTitles(client, committed.flatMap((c) => c.items)), rerunnable: [] };
+  if (to <= edge) return { committedUntil: edge, from: range.from, to, committed, slots: [], titles, clips: await clipTitles(client, committed.flatMap((c) => c.items), clock.now()), rerunnable: [] };
 
   const staged = store.stagedSlots(ch.id, edge);
   const rows = new Map(staged.map((r) => [r.start, r]));
@@ -207,7 +186,7 @@ export async function calendarPlan(deps: Pick<WorkerDeps, 'store' | 'client' | '
       warnings: shaped.warnings.filter((w) => w.at >= s.start && w.at < s.end),
     });
   }
-  const clips = await clipTitles(client, [...committed.flatMap((c) => c.items), ...slots.flatMap((x) => x.slot.items)]);
+  const clips = await clipTitles(client, [...committed.flatMap((c) => c.items), ...slots.flatMap((x) => x.slot.items)], clock.now());
   const rerunnable = new Set<string>();
   for (const x of slots) for (const b of x.slot.blocks) if (!b.pinned && earlierEpisode(schedule.pools[x.slot.pool], b.programId, titles)) rerunnable.add(b.programId);
   return { committedUntil: edge, from: range.from, to, committed, slots, titles, clips, rerunnable: [...rerunnable] };
@@ -253,6 +232,10 @@ export async function stageRerun(
   if (!earlier) throw new ConsistencyError('this is the first episode, so there is nothing earlier to replay');
   const program = library.programs[earlier];
   if (!program) throw new ConsistencyError('the earlier episode is not in the library');
+  // The page names the block's program; what the server holds may have moved on since (a week planned again, another edit).
+  const view = await calendarPlan(deps, channelName, { from: at.start, to: at.start + 1 });
+  const block = view.slots.find((x) => x.slot.start === at.start)?.slot.blocks[at.block - 1];
+  if (!block || block.programId !== at.programId) throw new ConsistencyError('that block plays something else now (the page is out of date): reload the calendar and try again');
   deps.store.setPin(channelName, at.start, at.block, { id: earlier, title: titles[earlier] ?? earlier, duration: program.duration });
   return stageRefresh(deps, channelName, at.start);
 }
@@ -332,7 +315,7 @@ const listClips = new Map<string, { at: number; titles: Record<string, string> }
 const KEEP_MS = 10 * 60_000;
 
 /** Titles for the clips the items use. A clip Tunarr no longer lists has no title. */
-async function clipTitles(client: TunarrClient, items: readonly Item[]): Promise<Record<string, string>> {
+async function clipTitles(client: TunarrClient, items: readonly Item[], now: number): Promise<Record<string, string>> {
   const used = new Set<string>();
   for (const i of items) if (i.kind === 'filler') used.add(i.list);
   if (used.size === 0) return {};
@@ -341,11 +324,11 @@ async function clipTitles(client: TunarrClient, items: readonly Item[]): Promise
   for (const name of used) {
     const id = byName.get(name) ?? name;
     let held = listClips.get(id);
-    if (!held || Date.now() - held.at > KEEP_MS) {
+    if (!held || now - held.at > KEEP_MS) {
       try {
-        held = { at: Date.now(), titles: Object.fromEntries((await client.fillerListClips(id)).map((c) => [c.id, c.title])) };
+        held = { at: now, titles: Object.fromEntries((await client.fillerListClips(id)).map((c) => [c.id, c.title])) };
       } catch {
-        held = { at: Date.now(), titles: {} };
+        held = { at: now, titles: {} };
       }
       listClips.set(id, held);
     }

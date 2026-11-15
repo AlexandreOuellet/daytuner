@@ -5,6 +5,7 @@ import { App } from './App';
 import { configure } from '@testing-library/react';
 import { polling, type SlotModel } from './api';
 import { poolSummary } from './components/Templates';
+import { lengthText, toRules } from './components/RulesEditor';
 import { parseRoute, scheduleLink } from './router';
 import { eventsOf } from './components/WeekGrid';
 import { DAY, HOUR, WEEK, daySegments, gapSegments, hasGaps, moveTo, place, resizeTo, roomFrom } from './week';
@@ -113,6 +114,13 @@ function serve(save?: (b: any) => unknown, extraPools: Record<string, unknown> =
 // The calendar's events are found by their label; role queries over its many elements are very slow in jsdom.
 const evs = (re: RegExp): HTMLElement[] => [...document.querySelectorAll<HTMLElement>('.fc-event')].filter((e) => re.test(e.getAttribute('aria-label') ?? ''));
 const ev = (re: RegExp): Promise<HTMLElement> => waitFor(() => { const found = evs(re); if (found.length === 0) throw new Error(`no slot matches ${re}`); return found[0]!; });
+
+describe('a length written back to the file', () => {
+  it('keeps seconds instead of rounding to the minute', () => {
+    expect([117 * 60_000, 90_000, 61 * 60_000 + 30_000, 45_000, 60_000].map(lengthText)).toEqual(['117m', '1m30s', '61m30s', '45s', '1m']);
+    expect(toRules({ movies: { genre: 'Comedy', duration: { op: '<=', ms: 90_000 } } } as never).raw).toEqual({ movies: { genre: 'Comedy', duration: '<=1m30s' } });
+  });
+});
 
 describe('the schedule designer', () => {
   it('draws the week with a block per slot and no unsaved changes', async () => {

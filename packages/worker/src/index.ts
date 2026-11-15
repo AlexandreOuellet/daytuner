@@ -5,3 +5,4 @@ export * from './scheduler.js';
 export * from './adsample.js';
 export * from './poolstats.js';
 export * from './calendar.js';
+export * from './resolvecache.js';

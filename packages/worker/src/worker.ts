@@ -7,6 +7,7 @@ import { adjustSequence, placeInList, computeMetrics, diffSlots, emptyPlanState,
 import { parseScheduleFile, resolveSchedule } from '@daytuner/schedule';
 import { cachedSource } from './chapters.js';
 import type { ChannelRecord, CommitRecord, PinRecord, StagedSlotRecord, Store } from '@daytuner/store';
+import { resolveCached } from './resolvecache.js';
 import { alignToGrid, appendVerified, toLineupItems, totalDuration, type LineupItem, type TunarrClient } from '@daytuner/tunarr-client';
 
 /** Two ends closer than this are the same: Tunarr's durations carry fractions that are rounded. */
@@ -451,10 +452,11 @@ export async function revisionImpact(deps: Pick<WorkerDeps, 'store' | 'client' |
   const ch = store.channel(channelName);
   if (!ch) throw new ConsistencyError(`no channel named "${channelName}" in the store`);
   const staged = store.stagedSlots(ch.id);
-  const parsed = parseScheduleFile(yaml);
-  const next = await resolveSchedule(parsed, cachedSource(client, store, clock));
+  parseScheduleFile(yaml);
+  // Read through the shared cache: a check followed by the save of the same text, and the calendar, read the library once.
+  const next = await resolveCached(deps, { tunarrId: ch.tunarrId, schedule: yaml });
   if (staged.length === 0) return { conflicts: [], changes: [], staged: 0, titles: next.titles };
-  const current = await resolveSchedule(parseScheduleFile(ch.schedule), cachedSource(client, store, clock));
+  const current = await resolveCached(deps, ch);
   const to = Math.max(...staged.map((s) => s.start)) + 1;
   const origin = await planOrigin(deps, ch, current.schedule.grid);
   const planUnder = (r: typeof current) => {

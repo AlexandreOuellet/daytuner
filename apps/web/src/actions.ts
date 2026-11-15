@@ -8,7 +8,7 @@ import { addIds, adSettingsOf, languageName, applyAdSettings, applyScheduleModel
 import type { ChannelRecord, PinRecord, Store } from '@daytuner/store';
 import type { TunarrClient } from '@daytuner/tunarr-client';
 import {
-  adSamples, calendarPlan, stageRerun, poolStats, adjustCursor, adoptHistory, addChannel, createChannel, newChannelFile, gridsFor, cachedSource, cursorPreview, listSequences, resync, revisionImpact, stageCheck, stageDiff, stageEdit, stageGenerate,
+  adSamples, calendarPlan, resolveCached, stageRerun, poolStats, adjustCursor, adoptHistory, addChannel, createChannel, newChannelFile, gridsFor, cachedSource, cursorPreview, listSequences, resync, revisionImpact, stageCheck, stageDiff, stageEdit, stageGenerate,
   runAndRecord, stageRefresh, stageReset, topUp, type StageEdit, type StageResult,
 } from '@daytuner/worker';
 import { Jobs } from './jobs.js';
@@ -271,7 +271,9 @@ export function registerActions(app: Hono, d: ActionDeps): void {
 
   /** Saves a new revision unless locked staged slots would stop fitting (then only with `force`). */
   const saveSchedule = async (ch: ChannelRecord, yaml: string, force: boolean) => {
-    await resolveSchedule(parseScheduleFile(yaml), cachedSource(d.client, d.store, d.clock));
+    // The check of the same text just before (the page does one) and the calendar left the library read; revisionImpact reads it
+    // through the same cache, so the text is resolved once. An unchanged text is only checked that it still resolves.
+    if (yaml === ch.schedule) await resolveCached(deps, ch);
     const impact = yaml === ch.schedule ? undefined : await revisionImpact(deps, ch.name, yaml);
     if (impact && impact.conflicts.length > 0 && !force) return { saved: false, revision: ch.revision, impact };
     return { saved: true, revision: d.store.setSchedule(ch.name, yaml, d.clock.now()), ...(impact ? { impact } : {}) };

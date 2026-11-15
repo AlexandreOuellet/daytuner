@@ -218,10 +218,18 @@ export function ShowRules({ name, raw, library, onChange }: { name: string; raw:
   );
 }
 
+/** A length as the file writes it: whole minutes as "117m", and a part of a minute kept ("1m30s"), not rounded to the minute. */
+export function lengthText(ms: number): string {
+  const seconds = Math.round(ms / 1000);
+  const m = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  return rest === 0 ? `${m}m` : `${m > 0 ? `${m}m` : ''}${rest}s`;
+}
+
 /** A pool of the page's plain kind, written as rules so that it can be given more conditions. */
 export function toRules(p: PoolModel): PoolModel {
   const order = p.order;
   if (p.shows) return { raw: { shows: p.shows.map((r) => (r.id ? { show: r.show, id: r.id } : r.show)) }, ...(order ? { order } : {}) };
   const m = p.movies ?? {};
-  return { raw: { movies: { ...(m.genre ? { genre: m.genre } : {}), ...(m.duration ? { duration: `${m.duration.op}${Math.round(m.duration.ms / 60_000)}m` } : {}) } }, ...(order ? { order } : {}) };
+  return { raw: { movies: { ...(m.genre ? { genre: m.genre } : {}), ...(m.duration ? { duration: `${m.duration.op}${lengthText(m.duration.ms)}` } : {}) } }, ...(order ? { order } : {}) };
 }

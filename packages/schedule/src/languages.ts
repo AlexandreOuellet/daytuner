@@ -21,3 +21,16 @@ export function languageName(code: string): string {
   const hit = Object.entries(NAMES).find(([name, c]) => c === code && name !== 'mandarin' && name !== 'cantonese');
   return hit ? hit[0][0]!.toUpperCase() + hit[0].slice(1) : code;
 }
+
+/** Three-letter codes come in two sets for twenty languages (terminologic "fra", bibliographic "fre"); a library may use either. */
+const VARIANTS: [string, string][] = [
+  ['fra', 'fre'], ['deu', 'ger'], ['ces', 'cze'], ['ell', 'gre'], ['fas', 'per'], ['nld', 'dut'], ['ron', 'rum'], ['zho', 'chi'], ['isl', 'ice'],
+  ['mkd', 'mac'], ['msa', 'may'], ['slk', 'slo'], ['bod', 'tib'], ['cym', 'wel'], ['hye', 'arm'], ['eus', 'baq'], ['mya', 'bur'], ['kat', 'geo'], ['sqi', 'alb'],
+];
+
+/** A code with its other spelling, if it has one: "fra" gives ["fra", "fre"], "eng" gives ["eng"]. A rule matches either. */
+export function languageVariants(code: string): string[] {
+  const c = code.toLowerCase();
+  for (const [a, b] of VARIANTS) if (c === a || c === b) return [a, b];
+  return [c];
+}
