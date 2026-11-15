@@ -23,6 +23,8 @@ export interface AppDeps {
   jobs?: Jobs;
   /** The built pages (apps/ui/dist). When given, the server also serves them. */
   uiDir?: string;
+  /** The time zone new channels get (the server's own when not given). */
+  timezone?: string;
 }
 
 class NotFound extends Error {}
@@ -185,7 +187,7 @@ export function createApp(deps: AppDeps): Hono {
     return c.json(j);
   });
 
-  registerActions(app, { store, clock, jobs, client: deps.client, ...(deps.writeClient ? { writeClient: deps.writeClient } : {}), channel });
+  registerActions(app, { store, clock, jobs, client: deps.client, ...(deps.writeClient ? { writeClient: deps.writeClient } : {}), ...(deps.timezone ? { timezone: deps.timezone } : {}), channel });
 
   if (deps.uiDir) {
     const root = resolve(deps.uiDir);

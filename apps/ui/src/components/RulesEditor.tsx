@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { Library, PoolModel, RuleValueField } from '../api';
 
 type Obj = Record<string, unknown>;
@@ -11,6 +11,23 @@ const valueOf = (t: string): string | string[] | undefined => {
   const parts = t.split(',').map((x) => x.trim()).filter((x) => x !== '');
   return parts.length === 0 ? undefined : parts.length === 1 ? parts[0]! : parts;
 };
+
+/**
+ * The text of a box while it is typed. The file holds only the values, so "Comedy," and "Comedy" are the same value and a box that
+ * showed what the file holds would swallow the comma. The typed text is kept, and replaced only when the file's value
+ * changes from elsewhere (a suggestion, a reset).
+ */
+function useDraft(value: string): [string, (t: string) => void] {
+  const [draft, setDraft] = useState(value);
+  useEffect(() => { setDraft((d) => (JSON.stringify(valueOf(d)) === JSON.stringify(valueOf(value)) ? d : value)); }, [value]);
+  return [draft, setDraft];
+}
+
+/** The shows an entry leaves out, typed as names with commas (the typed text is kept, see `useDraft`). */
+function LeftOut({ label, held, onText }: { label: string; held: string; onText: (text: string) => void }) {
+  const [text, setText] = useDraft(held);
+  return <input aria-label={label} value={text} onChange={(ev) => { setText(ev.target.value); onText(ev.target.value); }} />;
+}
 
 const FIELDS: { key: string; label: string; hint: string; movieOnly?: boolean }[] = [
   { key: 'genre', label: 'Genre', hint: 'Comedy, Horror' },
@@ -31,8 +48,10 @@ const VALUE_FIELDS = new Set<string>(['genre', 'rating', 'studio', 'tag', 'actor
 const LIST_SHOWN = 10;
 
 /** One box of a rule. For a field the library has values for, it lists matching values while it has focus and marks a typo. */
-function RuleBox({ field, label, value, values, onChange }: { field: { key: string; label: string; hint: string }; label: string; value: string; values: Values; onChange: (text: string) => void }) {
+function RuleBox({ field, label, value: held, values, onChange: report }: { field: { key: string; label: string; hint: string }; label: string; value: string; values: Values; onChange: (text: string) => void }) {
   const [focus, setFocus] = useState(false);
+  const [value, setValue] = useDraft(held);
+  const onChange = (text: string): void => { setValue(text); report(text); };
   const known = VALUE_FIELDS.has(field.key) ? values?.[field.key as RuleValueField] : undefined;
   const parts = value.split(',');
   const last = (parts[parts.length - 1] ?? '').trim().toLowerCase();
@@ -156,9 +175,9 @@ export function ShowRules({ name, raw, library, onChange }: { name: string; raw:
             <RuleList title="Except shows that match" rules={ruleList(o['except'])} movies={false} label={`${name} entry ${i + 1} except`} values={library?.values}
               onChange={(l) => { const next = { ...o }; if (l.length === 0) delete next['except']; else next['except'] = l; setEntry(i, next); }} />
             <label className="small">Except these shows (names, commas){' '}
-              <input aria-label={`${name} entry ${i + 1}: shows left out`} value={ruleList(o['except']).flatMap((x) => (typeof x['show'] === 'string' ? [x['show']] : [])).join(', ')}
-                onChange={(ev) => {
-                  const named2 = ev.target.value.split(',').map((s) => s.trim()).filter(Boolean).map((s) => ({ show: s }));
+              <LeftOut label={`${name} entry ${i + 1}: shows left out`} held={ruleList(o['except']).flatMap((x) => (typeof x['show'] === 'string' ? [x['show']] : [])).join(', ')}
+                onText={(text) => {
+                  const named2 = text.split(',').map((s) => s.trim()).filter(Boolean).map((s) => ({ show: s }));
                   const rest = ruleList(o['except']).filter((x) => typeof x['show'] !== 'string');
                   const all = [...rest, ...named2];
                   const next = { ...o }; if (all.length === 0) delete next['except']; else next['except'] = all; setEntry(i, next);

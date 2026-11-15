@@ -34,7 +34,7 @@ week:
 
 type Res = { status: number; body: any };
 
-function build(writes = false) {
+function build(writes = false, timezone?: string) {
   const startTime = NOW - 10 * DAY;
   const fake = new FakeTunarr({
     shows: [{ id: 'show-a', title: 'Show A', episodes: Array.from({ length: 300 }, (_, i) => ({ id: `ep${i + 1}`, title: `Ep ${i + 1}`, duration: 22 * MIN + 1000, season: 1 + Math.floor(i / 20), episode: (i % 20) + 1 })) }],
@@ -52,6 +52,7 @@ function build(writes = false) {
   const app = createApp({
     store, clock, jobs, client: new TunarrClient('http://tunarr.test', fake.fetch),
     ...(writes ? { writeClient: new TunarrClient('http://tunarr.test', fake.fetch, true) } : {}),
+    ...(timezone ? { timezone } : {}),
   });
   const call = async (method: string, path: string, body?: unknown): Promise<Res> => {
     const r = await app.request(path, { method, ...(body !== undefined ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : {}) });
@@ -314,6 +315,16 @@ describe('actions', () => {
     expect(done).toMatchObject({ state: 'done', result: { action: 'appended' } });
     expect(w.fake.lineup.length).toBeGreaterThan(before);
     expect(((await w.get('/api/channels/Test/commits')).body)[0]).toMatchObject({ status: 'done' });
+  });
+
+  it('offers, and accepts, only the grids that fit the server time zone', async () => {
+    const w = build(true, 'Asia/Kolkata');
+    expect((await w.get('/api/add-channel')).body.grids).toEqual([5, 10, 15, 30]);
+    const refused = await w.post('/api/add-channel/create', { name: 'Delhi', number: 12, gridMinutes: 60 });
+    expect(refused.status).toBe(400);
+    expect(JSON.stringify(refused.body)).toContain('fit the time zone Asia/Kolkata');
+    expect(w.fake.created).toEqual([]);
+    expect((await w.job('/api/add-channel/create', { name: 'Delhi', number: 12, gridMinutes: 30 })).state).toBe('done');
   });
 
   it('adds a channel from the page: attaches a Tunarr channel that exists (writing off), or creates a new hidden one (writing on)', async () => {

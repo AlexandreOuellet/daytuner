@@ -9,7 +9,7 @@ import { poolStats } from './poolstats.js';
 import { adSettingsOf, parseScheduleFile } from '@daytuner/schedule';
 import { isDue, runAndRecord, scheduledInstant } from './scheduler.js';
 import { blocksFromLineup, calendarPlan, earlierEpisode, runsOf, stageRerun } from './calendar.js';
-import { cursorPreview, stageReset, adjustCursor, adoptHistory, revisionImpact, stageCheck, stageDiff, stageEdit, stageGenerate, stageRefresh, ConsistencyError, listSequences, resync, topUp, createChannel, newChannelFile, layoutProblems, poolChanges, type WorkerDeps } from './worker.js';
+import { cursorPreview, stageReset, adjustCursor, adoptHistory, revisionImpact, stageCheck, stageDiff, stageEdit, stageGenerate, stageRefresh, ConsistencyError, listSequences, resync, topUp, createChannel, addChannel, newChannelFile, layoutProblems, poolChanges, gridsFor, gridFitsZone, originOf, type WorkerDeps } from './worker.js';
 
 const DAY = 86_400_000;
 const MIN = 60_000;
@@ -191,19 +191,35 @@ describe('it refuses to write when it should not', () => {
     expect(s.store.commits(s.store.channel('Test')!.id)[0]!.slots[0]!.start).toBe(next);
   });
 
-  it('still refuses a drift that moves the lineup to another grid line, or is a second or more', async () => {
+  it('carries on when the end has drifted a little past the grid line it was written to, at the cost of a grid step of flex, and says so as a warning', async () => {
+    // Tunarr reads a clip back with its real length, which can be a fraction over what was written as well as under it.
     const s = setup();
     const edge = s.store.channel('Test')!.edge;
-    const next = Math.ceil((edge + 1) / (15 * MIN)) * (15 * MIN);
-    s.store.setEdge('Test', next);
-    s.fake.appendExternally([{ type: 'flex', duration: next + 139 - edge }]); // 139 ms after the line: the next line is a quarter hour away
-    await expect(topUp(s.deps, 'Test')).rejects.toThrow(/outside DayTuner/);
+    const line = Math.ceil((edge + 1) / (15 * MIN)) * (15 * MIN);
+    s.store.setEdge('Test', line);
+    s.fake.appendExternally([{ type: 'flex', duration: line + 139 - edge }]); // 139 ms after the line
+    const r = await topUp(s.deps, 'Test');
+    expect(r.action).toBe('appended');
+    const w = r.warnings.find((x) => x.code === 'edge-drift')!;
+    expect(w.severity).toBe('warning');
+    expect(w.message).toMatch(/139 ms after/);
+    expect(w.message).toMatch(/15 minutes/); // what it costs: the next slot waits for the next grid line
+    expect(s.store.commits(s.store.channel('Test')!.id)[0]!.slots[0]!.start).toBe(line + 15 * MIN);
+  });
+
+  it('still refuses a drift that is a second or more, in either direction', async () => {
     const t = setup();
     const e2 = t.store.channel('Test')!.edge;
     const n2 = Math.ceil((e2 + 1) / (15 * MIN)) * (15 * MIN);
     t.store.setEdge('Test', n2);
     t.fake.appendExternally([{ type: 'flex', duration: n2 - 1500 - e2 }]);
     await expect(topUp(t.deps, 'Test')).rejects.toThrow(/outside DayTuner/);
+    const u = setup();
+    const e3 = u.store.channel('Test')!.edge;
+    const n3 = Math.ceil((e3 + 1) / (15 * MIN)) * (15 * MIN);
+    u.store.setEdge('Test', n3);
+    u.fake.appendExternally([{ type: 'flex', duration: n3 + 1500 - e3 }]); // a second and a half past the line
+    await expect(topUp(u.deps, 'Test')).rejects.toThrow(/outside DayTuner/);
   });
 
   it('refuses when the lineup has already run out', async () => {
@@ -1161,8 +1177,41 @@ describe('creating a channel', () => {
     await expect(createChannel(s.deps, { ...opts, number: 1 })).rejects.toThrow(/choose another number/);
     await expect(createChannel(s.deps, { ...opts, name: 'test' })).rejects.toThrow(/choose another name/);
     await expect(createChannel(s.deps, { ...opts, name: '  ' })).rejects.toThrow(/give the channel a name/);
-    await expect(createChannel(s.deps, { ...opts, adList: 'No such list' })).rejects.toThrow();
+    await expect(createChannel(s.deps, { ...opts, adList: 'No such list' })).rejects.toThrow(/No such list/);
     expect(s.fake.created).toEqual([]);
+  });
+
+  it('takes over a channel an earlier try left in Tunarr (it failed after the create), instead of refusing the retry or making a second', async () => {
+    const s = setup();
+    const lineup = vi.spyOn(s.deps.client, 'lineup').mockRejectedValueOnce(new Error('Tunarr dropped the connection'));
+    await expect(createChannel(s.deps, opts)).rejects.toThrow(/dropped the connection/);
+    expect(s.fake.created).toHaveLength(1); // made in Tunarr
+    expect(s.store.channel('Late Night')).toBeUndefined(); // but not taken over
+    lineup.mockRestore();
+    const r = await createChannel(s.deps, opts); // the same form sent again
+    expect(s.fake.created).toHaveLength(1); // no second channel
+    expect(r.name).toBe('Late Night');
+    expect(s.store.channel('Late Night')).toMatchObject({ tunarrId: s.fake.created[0]!['id'] });
+    // but a channel of that number and name that DayTuner already manages is still refused
+    await expect(createChannel(s.deps, opts)).rejects.toThrow(/already manages/);
+  });
+
+  it('does not take over a channel that has a lineup, or one that only shares the number', async () => {
+    const s = setup();
+    s.fake.created.push({ id: 'used', number: 9, name: 'Late Night', startTime: NOW0 - DAY });
+    s.fake.createdLineups.set('used', [{ type: 'flex', duration: 3600_000 }]);
+    await expect(createChannel(s.deps, opts)).rejects.toThrow(/Tunarr already has a channel 9/);
+    const t = setup();
+    t.fake.created.push({ id: 'other', number: 9, name: 'Something Else', startTime: NOW0 - DAY, duration: 0 });
+    await expect(createChannel(t.deps, opts)).rejects.toThrow(/choose another/);
+  });
+
+  it('refuses to manage one Tunarr channel under two names', async () => {
+    const s = setup();
+    await createChannel(s.deps, opts);
+    const file = newChannelFile({ ...opts, name: 'Second Name' });
+    await expect(addChannel(s.deps, { yaml: file, tunarrChannel: String(s.fake.created[0]!['id']), floorMs: 7 * DAY, stepMs: DAY, seed: 1 })).rejects.toThrow(/already managed here as "Late Night"/);
+    expect(s.store.channel('Second Name')).toBeUndefined();
   });
 
   it('plans nothing for a channel with no slots, and writes nothing', async () => {
@@ -1186,5 +1235,70 @@ describe('creating a channel', () => {
     expect(r.planned![0]!.start).toBe(nowLine);
     expect(s.fake.createdLineup[0]).toMatchObject({ type: 'flex', duration: nowLine - startTime });
     expect(s.store.channel('Late Night')!.edge).toBeGreaterThan(s.clock.t + 7 * DAY);
+  });
+
+  it('everything that plans ahead starts where the next run will, for a channel that sat empty (not at its old start time)', async () => {
+    const s = setup();
+    await createChannel(s.deps, opts);
+    const startTime = s.fake.created[0]!['startTime'] as number;
+    s.clock.t = startTime + 3 * DAY + 7 * MIN;
+    s.store.setSchedule('Late Night', YAML.replace(/^channel: .*$/m, 'channel: Late Night'), s.clock.t);
+    const nowLine = Math.floor(s.clock.t / (15 * MIN)) * 15 * MIN;
+    const cal = await calendarPlan(s.deps, 'Late Night', { from: nowLine, to: nowLine + 2 * DAY });
+    expect(cal.committedUntil).toBe(nowLine); // not three days earlier, where the channel was created
+    expect(cal.slots[0]!.slot.start).toBeGreaterThanOrEqual(nowLine);
+    const staged = await stageGenerate(s.deps, 'Late Night', { to: nowLine + DAY });
+    expect(staged.planned).toBeGreaterThan(0);
+    expect(Math.min(...s.store.stagedSlots(s.store.channel('Late Night')!.id).map((r) => r.start))).toBeGreaterThanOrEqual(nowLine);
+    // and the run then writes what the calendar showed
+    const r = await topUp(s.deps, 'Late Night');
+    expect(r.planned![0]!.start).toBe(cal.slots[0]!.slot.start);
+  });
+});
+
+describe('the grid and the time zone', () => {
+  const NOW = Date.UTC(2026, 10, 20, 12);
+  it('lets a grid through only when it divides the zone offset from UTC, in winter and in summer', () => {
+    expect(gridsFor('America/Toronto', NOW)).toEqual([5, 10, 15, 20, 30, 60]);
+    expect(gridsFor('UTC', NOW)).toEqual([5, 10, 15, 20, 30, 60]);
+    expect(gridsFor('Asia/Kolkata', NOW)).toEqual([5, 10, 15, 30]); // +5:30
+    expect(gridsFor('America/St_Johns', NOW)).toEqual([5, 10, 15, 30]); // -3:30 and -2:30
+    expect(gridFitsZone('Asia/Kathmandu', 30 * MIN, NOW)).toBe(false); // +5:45
+    expect(gridFitsZone('Asia/Kathmandu', 15 * MIN, NOW)).toBe(true);
+  });
+  it('refuses to create a channel on a grid its zone cannot lie on, and says which grids would do', async () => {
+    const s = setup();
+    const o = { name: 'Delhi', number: 12, hidden: true, timezone: 'Asia/Kolkata', gridMinutes: 60, floorMs: 7 * DAY, stepMs: DAY, seed: 1 };
+    await expect(createChannel(s.deps, o)).rejects.toThrow(/does not fit the time zone Asia\/Kolkata.*5, 10, 15, 30/);
+    expect(s.fake.created).toEqual([]);
+    await createChannel(s.deps, { ...o, gridMinutes: 30 });
+    expect(s.fake.created).toHaveLength(1);
+  });
+  it('refuses a run for a channel file whose grid its zone cannot lie on, with the reason, before writing anything', async () => {
+    const s = setup();
+    s.store.setSchedule('Test', YAML.replace(/^timezone: .*$/m, 'timezone: Asia/Kolkata').replace(/^grid: .*$/m, 'grid: 60m'), s.clock.t);
+    await expect(topUp(s.deps, 'Test')).rejects.toThrow(/60-minute grid does not fit the time zone Asia\/Kolkata/);
+    expect(s.fake.requests.filter((x) => x.includes('programming') && x.startsWith('POST'))).toEqual([]);
+  });
+  it('starts an empty channel at the grid line before now, and a written one at the line after its end', () => {
+    const grid = 15 * MIN;
+    expect(originOf(1000, true, grid, 10 * DAY + 7 * MIN)).toEqual({ from: 10 * DAY, flex: 10 * DAY - 1000 });
+    expect(originOf(1000, false, grid, 10 * DAY + 7 * MIN)).toEqual({ from: grid, flex: grid - 1000 });
+    expect(originOf(10 * DAY + 3 * MIN, true, grid, 10 * DAY + 7 * MIN)).toEqual({ from: 10 * DAY + grid, flex: grid - 3 * MIN });
+  });
+});
+
+describe('the calendar', () => {
+  it('plans again when the library changes, not only when the schedule or the state does', async () => {
+    const s = setup();
+    const range = { from: NOW0, to: NOW0 + 10 * DAY };
+    await calendarPlan(s.deps, 'Test', range); // warms the plan
+    for (let i = 0; i < 4; i++) s.fake.data.movies.push({ id: `mov-new${i}`, title: `New ${i}`, duration: (70 + i) * MIN, genres: ['Comedy'] });
+    s.clock.t += 31 * MIN; // the library is read again after half an hour
+    const after = await calendarPlan(s.deps, 'Test', range);
+    const dry = await topUp(s.deps, 'Test', { dryRun: true }); // always plans fresh
+    const pick = (slots: { slot?: { pool: string; programs: string[] }; pool?: string; programs?: string[] }[]) =>
+      slots.map((x) => x.slot ?? (x as { pool: string; programs: string[] })).filter((x) => x.pool === 'movies').slice(0, 4).map((x) => x.programs);
+    expect(pick(after.slots)).toEqual(pick(dry.planned!));
   });
 });

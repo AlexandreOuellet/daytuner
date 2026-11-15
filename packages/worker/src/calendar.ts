@@ -7,9 +7,9 @@ import { createHash } from 'node:crypto';
 import { plan, type Item, type PlannedSlot, type PlanResult, type PlanWarning } from '@daytuner/engine';
 import { adSettingsOf, parseScheduleFile, resolveSchedule } from '@daytuner/schedule';
 import type { StagedSlotRecord } from '@daytuner/store';
-import { alignToGrid, type TunarrClient } from '@daytuner/tunarr-client';
+import type { TunarrClient } from '@daytuner/tunarr-client';
 import { cachedSource } from './chapters.js';
-import { ConsistencyError, stagedInputs, stageRefresh, type StageResult, type WorkerDeps } from './worker.js';
+import { ConsistencyError, planOrigin, stagedInputs, stageRefresh, type StageResult, type WorkerDeps } from './worker.js';
 
 /**
  * Where a slot lives. `committed`: already in Tunarr's lineup. `staged`: stored in DayTuner, waiting to be committed (it may
@@ -162,7 +162,7 @@ export async function calendarPlan(deps: Pick<WorkerDeps, 'store' | 'client' | '
   if (!ch) throw new ConsistencyError(`no channel named "${channelName}" in the store`);
   if (!(range.to > range.from)) throw new ConsistencyError('the end of the range must be after its start');
   const { schedule, library, titles } = await resolveCached(deps, ch);
-  const { from: edge } = alignToGrid(ch.edge, schedule.grid);
+  const { from: edge } = await planOrigin(deps, ch, schedule.grid);
   const horizon = edge + 56 * 86_400_000;
   const to = Math.min(range.to, horizon);
   const poolOf = new Map<string, string>();
@@ -175,7 +175,9 @@ export async function calendarPlan(deps: Pick<WorkerDeps, 'store' | 'client' | '
   const inputs = stagedInputs(store, ch, edge, library, titles);
   // The same inputs give the same plan, so a plan that already reaches far enough is reused, and one that does not is
   // made to reach a few weeks beyond what was asked, so scrolling on does not plan again each time.
-  const key = createHash('sha1').update(JSON.stringify([ch.tunarrId, ch.schedule, edge, ch.state, staged.map((r) => [r.start, r.end, r.slotId, r.locked, r.edited, r.pins])])).digest('hex');
+  // What the pools hold now (the library is read again after half an hour) is part of what a plan depends on.
+  const content = Object.entries(schedule.pools).map(([name, p]) => [name, p.order, p.programs.map((id) => [id, library.programs[id]?.duration])]);
+  const key = createHash('sha1').update(JSON.stringify([ch.tunarrId, ch.schedule, edge, ch.state, content, staged.map((r) => [r.start, r.end, r.slotId, r.locked, r.edited, r.pins])])).digest('hex');
   let held = planned.get(key);
   if (!held || held.to < to) {
     const reach = Math.min(horizon, to + PLAN_AHEAD_MS);

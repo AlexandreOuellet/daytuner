@@ -28,7 +28,7 @@ export function App() {
       </header>
       <main>
         {server.error && <p className="error" role="alert">Cannot reach the DayTuner server: {server.error}</p>}
-        {route.page === 'dashboard' ? <Dashboard /> : route.page === 'add' ? <AddChannel /> : route.page === 'cursors' ? <Cursors name={route.name} /> : route.page === 'ads' ? <Ads name={route.name} /> : route.page === 'schedule' ? <Schedule name={route.name} /> : route.page === 'special' ? <SpecialDays name={route.name} /> : route.page === 'calendar' ? <Calendar name={route.name} {...(route.date ? { date: route.date } : {})} /> : route.page === 'staging' ? <Staging name={route.name} {...(route.date ? { date: route.date } : {})} /> : <Channel name={route.name} />}
+        {route.page === 'dashboard' ? <Dashboard /> : route.page === 'add' ? <AddChannel /> : route.page === 'cursors' ? <Cursors name={route.name} /> : route.page === 'ads' ? <Ads name={route.name} /> : route.page === 'schedule' ? <Schedule name={route.name} /> : route.page === 'special' ? <SpecialDays name={route.name} /> : route.page === 'calendar' ? <Calendar key={route.name} name={route.name} {...(route.date ? { date: route.date } : {})} /> : route.page === 'staging' ? <Staging name={route.name} {...(route.date ? { date: route.date } : {})} /> : <Channel name={route.name} />}
       </main>
     </>
   );

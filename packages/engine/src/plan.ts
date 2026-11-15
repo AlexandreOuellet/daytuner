@@ -168,8 +168,11 @@ function applyLockedEffect(ctx: Ctx, work: Work, w: Window, held: PlannedSlot): 
     for (const id of held.programs) work.bags[poolKey(w.slot.pool)] = markDrawn(work.bags[poolKey(w.slot.pool)] ?? emptyBag(), id);
   } else if (w.slot.link?.mode !== 'rerun' && pool.programs.length > 0) {
     const key = sequenceKey(w.slot);
-    const seq = currentPlace(work, key, pool.programs, w, false);
-    work.sequences[key] = advanceSequence(seq, pool.programs, held.programs.length);
+    // A place that moved because the list changed is reported here too (this slot may be the first to meet the change; the later
+    // slots find the place already corrected and would say nothing).
+    const seq = currentPlace(work, key, pool.programs, w, true);
+    // A block pinned to another program (a rerun) takes nothing from the show, as when the slot is planned.
+    work.sequences[key] = advanceSequence(seq, pool.programs, (held.blocks.length > 0 ? held.blocks.filter((b) => !b.pinned).length : held.programs.length));
   }
   for (const it of held.items) {
     if (it.kind === 'filler') work.bags[bagKey(it.list)] = markDrawn(work.bags[bagKey(it.list)] ?? emptyBag(), it.clipId);

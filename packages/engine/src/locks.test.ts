@@ -37,6 +37,30 @@ describe('locked slots', () => {
     expect(withLock.slots[2]!.programs).toEqual(rerun.programs);
   });
 
+  it('count a block pinned to another program (a rerun) as taking nothing from the show, as planning it does', () => {
+    expect(office.blocks.length).toBeGreaterThan(1);
+    const pinned: PlannedSlot = { ...office, blocks: office.blocks.map((b, i) => (i === 0 ? { ...b, programId: 'a-rerun', pinned: true as const } : b)) };
+    const withPin = run({ locked: [pinned] }).state.sequences;
+    for (const [key, seq] of Object.entries(base.state.sequences)) {
+      const mine = withPin[key]!;
+      if (seq.position === mine.position) continue; // a show this slot does not draw from
+      expect(mine.position).toBe(seq.position - 1);
+    }
+    expect(JSON.stringify(withPin)).not.toBe(JSON.stringify(base.state.sequences));
+  });
+
+  it('say so when the list of an ordered show changed under the place they meet first (the later slots would find it corrected and say nothing)', () => {
+    const key = Object.keys(base.state.sequences)[0]!;
+    const list = fixtureSchedule().pools[office.pool]!.programs;
+    // The place says 5, but the last episode taken sits at 2: the list changed behind it.
+    const stale: PlanState = { ...freshState(), sequences: { ...freshState().sequences, [key]: { position: 5, history: 5, last: list[2]! } } };
+    const r = run({ state: stale, locked: [office], to: office.end });
+    expect(r.warnings.filter((w) => w.code === 'place-moved')).toHaveLength(1);
+    // and only once: a second slot of the same show finds the place corrected
+    const again = run({ state: stale, to: office.end });
+    expect(again.warnings.filter((w) => w.code === 'place-moved')).toHaveLength(1);
+  });
+
   it('mark their clips as drawn, so the next slot does not take them at once', () => {
     const state: PlanState = { ...freshState(), bags: { 'clips:Old Ads': { remaining: Array.from({ length: 40 }, (_, i) => `ad${i}`) } } };
     const r = run({ state, locked: [movie], to: movie.end });

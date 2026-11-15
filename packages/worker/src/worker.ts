@@ -39,6 +39,24 @@ export function poolChanges(before: Record<string, string[]> | undefined, schedu
   return out;
 }
 
+/**
+ * Where planning starts for a channel whose lineup ends at `edge`: the grid line at or after it. A channel nothing was ever written
+ * to has only its start time, and when that is in the past nothing before now can air: a flex bridges the gap, and the first plan
+ * starts at the grid line just before `now` (the start time is never changed). Everything that plans ahead (the next run, staging,
+ * the calendar, the previews) starts from here, so what they show is what the next run writes.
+ */
+export function originOf(edge: number, empty: boolean, grid: number, now: number): { from: number; flex: number } {
+  const aligned = alignToGrid(edge, grid);
+  const nowLine = Math.floor(now / grid) * grid;
+  return empty && aligned.from < nowLine ? { from: nowLine, flex: Math.round(nowLine - edge) } : aligned;
+}
+
+/** `originOf` for a channel of the store: reads Tunarr once to learn whether anything was ever written to it. */
+export async function planOrigin(deps: Pick<WorkerDeps, 'client' | 'clock'>, ch: { tunarrId: string; edge: number }, grid: number): Promise<{ from: number; flex: number }> {
+  const tun = await deps.client.channel(ch.tunarrId);
+  return originOf(ch.edge, tun.duration === 0, grid, deps.clock.now());
+}
+
 /** The store and Tunarr disagree, or Tunarr is in a state the worker will not write to. Nothing was written. */
 export class ConsistencyError extends Error {
   constructor(message: string) {
@@ -178,7 +196,11 @@ export async function topUp(deps: WorkerDeps, channelName: string, opts: TopUpOp
   // the new lineup starts on the grid line after a flex, as it does for any fractional end. Anything else is an outside change.
   const gridMs = parseScheduleFile(ch.schedule).grid;
   const drift = edgeNow - ch.edge;
-  const onlyDrift = !same(edgeNow, ch.edge) && Math.abs(drift) <= EDGE_DRIFT_TOLERANCE_MS && alignToGrid(edgeNow, gridMs).from === alignToGrid(ch.edge, gridMs).from;
+  // A drift short of the grid line is only a small flex. A drift past a line the store wrote to is tolerated too, but it costs the
+  // next slot a whole grid step of flex (it cannot start before the line after), so that case is a warning, not a note.
+  const wroteToLine = same(alignToGrid(ch.edge, gridMs).from, ch.edge);
+  const onlyDrift = !same(edgeNow, ch.edge) && Math.abs(drift) <= EDGE_DRIFT_TOLERANCE_MS
+    && (alignToGrid(edgeNow, gridMs).from === alignToGrid(ch.edge, gridMs).from || (drift > 0 && wroteToLine));
   if (!same(edgeNow, ch.edge) && !onlyDrift) {
     throw new ConsistencyError(
       `Tunarr's lineup for "${channelName}" ends at ${edgeNow} but the store recorded ${ch.edge}. Someone changed the channel outside DayTuner, or its database was restored. Nothing was written.`,
@@ -199,13 +221,18 @@ export async function topUp(deps: WorkerDeps, channelName: string, opts: TopUpOp
   if (ahead >= ch.floorMs + ch.stepMs) return { action: 'none', ...base };
 
   const { schedule, library, fillerListIds, titles } = await resolveSchedule(parseScheduleFile(ch.schedule), cachedSource(client, store, clock));
-  const aligned = alignToGrid(edgeNow, schedule.grid);
-  const nowLine = Math.floor(now / schedule.grid) * schedule.grid;
-  const { from, flex } = empty && aligned.from < nowLine ? { from: nowLine, flex: Math.round(nowLine - edgeNow) } : aligned;
-  const { locked, pins, windows } = stagedInputs(store, ch, edgeNow, library, titles);
+  const zone = parseScheduleFile(ch.schedule).timezone;
+  if (!gridFitsZone(zone, schedule.grid, now)) throw new ConsistencyError(`the ${schedule.grid / 60_000}-minute grid does not fit the time zone ${zone} (its offset from UTC is not a whole number of ${schedule.grid / 60_000}-minute steps), so the slots could not lie on the grid. Nothing was written. Use a grid that divides the offset (${gridsFor(zone, now).join(', ')} minutes).`);
+  const { from, flex } = originOf(edgeNow, empty, schedule.grid, now);
+  const { locked, pins, windows } = stagedInputs(store, ch, from, library, titles);
   const result = plan({ schedule, library, state: ch.state, from, to: now + ch.floorMs + ch.stepMs, locked, pins, windows });
   result.warnings.push(...poolChanges(store.poolsSeen(ch.id), schedule, titles, from));
-  if (onlyDrift) result.warnings.push({ code: 'edge-drift', severity: 'info', at: from, slotId: '', message: `Tunarr's lineup ends ${Math.abs(Math.round(drift))} ms ${drift < 0 ? 'before' : 'after'} where it was written to end (it stores the filler clips with their real lengths); a flex of ${Math.round(from - edgeNow)} ms brings the next slot back to the grid` });
+  if (onlyDrift) {
+    const lost = Math.round(from - edgeNow);
+    result.warnings.push(drift > 0 && lost >= gridMs / 2
+      ? { code: 'edge-drift', severity: 'warning', at: from, slotId: '', message: `Tunarr's lineup ends ${Math.round(drift)} ms after the grid line it was written to end on (it stores the filler clips with their real lengths), so the next slot has to wait for the next line: a flex of ${Math.round(lost / 60_000)} minutes (${gridMs / 60_000}-minute grid) is added` }
+      : { code: 'edge-drift', severity: 'info', at: from, slotId: '', message: `Tunarr's lineup ends ${Math.abs(Math.round(drift))} ms ${drift < 0 ? 'before' : 'after'} where it was written to end (it stores the filler clips with their real lengths); a flex of ${lost} ms brings the next slot back to the grid` });
+  }
   if (result.slots.length === 0) return { action: 'none', ...base, warnings: result.warnings };
 
   const items: LineupItem[] = [...(flex > 0 ? [{ type: 'flex' as const, duration: flex }] : []), ...toLineupItems(result.slots, fillerListIds)];
@@ -364,7 +391,7 @@ export async function stageGenerate(
   const ch = store.channel(channelName);
   if (!ch) throw new ConsistencyError(`no channel named "${channelName}" in the store`);
   const { schedule, library, titles } = await resolveSchedule(parseScheduleFile(ch.schedule), cachedSource(client, store, clock));
-  const { from } = alignToGrid(ch.edge, schedule.grid);
+  const { from } = await planOrigin(deps, ch, schedule.grid);
   const keepFrom = range.keepFrom ?? from;
   const keepTo = range.keepTo ?? range.to;
   if (!(range.to > from)) throw new ConsistencyError('the end of the range is not after the end of the committed lineup');
@@ -396,7 +423,7 @@ export async function stageDiff(deps: Pick<WorkerDeps, 'store' | 'client' | 'clo
   const staged = store.stagedSlots(ch.id);
   if (staged.length === 0) return { changes: [], staged: 0, titles: {} };
   const { schedule, library, titles } = await resolveSchedule(parseScheduleFile(ch.schedule), cachedSource(client, store, clock));
-  const { from } = alignToGrid(ch.edge, schedule.grid);
+  const { from } = await planOrigin(deps, ch, schedule.grid);
   const to = Math.max(...staged.map((s) => s.start)) + 1;
   const fresh = plan({ schedule, library, state: ch.state, from, to });
   const { locked, pins, windows } = stagedInputs(store, ch, from, library, titles);
@@ -429,8 +456,9 @@ export async function revisionImpact(deps: Pick<WorkerDeps, 'store' | 'client' |
   if (staged.length === 0) return { conflicts: [], changes: [], staged: 0, titles: next.titles };
   const current = await resolveSchedule(parseScheduleFile(ch.schedule), cachedSource(client, store, clock));
   const to = Math.max(...staged.map((s) => s.start)) + 1;
+  const origin = await planOrigin(deps, ch, current.schedule.grid);
   const planUnder = (r: typeof current) => {
-    const { from } = alignToGrid(ch.edge, r.schedule.grid);
+    const { from } = origin;
     const { locked, pins, windows } = stagedInputs(store, ch, from, r.library, r.titles);
     return plan({ schedule: r.schedule, library: r.library, state: ch.state, from, to, locked, pins, windows });
   };
@@ -458,7 +486,7 @@ export async function stageCheck(deps: Pick<WorkerDeps, 'store' | 'client' | 'cl
   const staged = store.stagedSlots(ch.id);
   if (staged.length === 0) return { conflicts: [], pinProblems: [], titles: {} };
   const { schedule, library, titles } = await resolveSchedule(parseScheduleFile(ch.schedule), cachedSource(client, store, clock));
-  const { from } = alignToGrid(ch.edge, schedule.grid);
+  const { from } = await planOrigin(deps, ch, schedule.grid);
   const { locked, pins, windows } = stagedInputs(store, ch, from, library, titles);
   const to = Math.max(...staged.map((s) => s.start)) + 1;
   const result = plan({ schedule, library, state: ch.state, from, to, locked, pins, windows });
@@ -629,20 +657,41 @@ export interface ChannelFileOptions {
 
 /** The grids a new channel may have, in minutes. */
 export const GRID_CHOICES = [5, 10, 15, 20, 30, 60] as const;
-const gridOf = (minutes: number | undefined): number => {
+
+/** How far `zone`'s clock is ahead of UTC at an instant, in whole milliseconds. */
+export function utcOffsetMs(zone: string, ms: number): number {
+  const p = new Intl.DateTimeFormat('en-CA', { timeZone: zone, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }).formatToParts(new Date(ms));
+  const g = (t: string): number => Number(p.find((x) => x.type === t)?.value);
+  return Date.UTC(g('year'), g('month') - 1, g('day'), g('hour'), g('minute'), g('second')) - Math.floor(ms / 1000) * 1000;
+}
+
+/**
+ * Whether a grid fits a time zone. A slot sits on the zone's clock (20:00), the lineup's grid lines on the epoch, and the two agree
+ * only when the grid divides the zone's offset from UTC, in winter and in summer. In Toronto (-5 h, -4 h) every choice does; in
+ * India (+5:30) a 20-minute or an hour grid does not, and a lineup on it would be refused at every run.
+ */
+export function gridFitsZone(zone: string, gridMs: number, now: number): boolean {
+  return [now, now + 91 * 86_400_000, now + 182 * 86_400_000, now + 273 * 86_400_000].every((t) => utcOffsetMs(zone, t) % gridMs === 0);
+}
+
+/** The grids, in minutes, that a new channel in `zone` may have. */
+export const gridsFor = (zone: string, now: number): number[] => GRID_CHOICES.filter((m) => gridFitsZone(zone, m * 60_000, now));
+
+const gridOf = (minutes: number | undefined, zone: string, now: number): number => {
   const m = minutes ?? 15;
   if (!(GRID_CHOICES as readonly number[]).includes(m)) throw new ConsistencyError(`the grid must be one of ${GRID_CHOICES.join(', ')} minutes`);
+  if (!gridFitsZone(zone, m * 60_000, now)) throw new ConsistencyError(`a ${m}-minute grid does not fit the time zone ${zone} (its offset from UTC is not a whole number of ${m}-minute steps); choose one of ${gridsFor(zone, now).join(', ')} minutes`);
   return m * 60_000;
 };
 
 /** The text of a channel file with no slots and no pools yet: the week is designed on the schedule page. Grid 15 minutes unless given. */
-export function newChannelFile(o: ChannelFileOptions): string {
+export function newChannelFile(o: ChannelFileOptions, now: number = Date.now()): string {
   const q = (t: string): string => JSON.stringify(t);
   const ads = o.adList
     ? [`  mid:  { list: ${q(o.adList)}, every: 8m, length: 2m-3m, tailBuffer: 1m }`, `  post: { list: ${q(o.adList)}, length: 0-5m }`, `  tail: { list: ${q(o.adList)}, length: 0-25m }`]
     : [];
   return [
-    `channel: ${q(o.name)}`, `timezone: ${q(o.timezone)}`, `grid: ${gridOf(o.gridMinutes) / 60_000}m`,
+    `channel: ${q(o.name)}`, `timezone: ${q(o.timezone)}`, `grid: ${gridOf(o.gridMinutes, o.timezone, now) / 60_000}m`,
     'ads:', '  step: 15s', '  ratio: { min: 15%, max: 60% }', ...ads,
     ...(o.fillerList ? [`interstitial: { list: ${q(o.fillerList)} }`] : []),
     'pools: {}', 'week: {}', '',
@@ -669,13 +718,17 @@ export async function createChannel(deps: WorkerDeps, o: CreateChannelOptions): 
   if (!Number.isInteger(o.number) || o.number < 1) throw new ConsistencyError('the channel number must be a whole number from 1');
   if (store.channel(name)) throw new ConsistencyError(`DayTuner already manages a channel named "${name}"`);
   const existing = await client.channels();
-  const clash = existing.find((c) => c.number === o.number || slugOf(c.name) === slugOf(name));
+  const managedIds = new Set(store.channels().map((x) => x.tunarrId));
+  // A channel made by an earlier try that failed before DayTuner took it over (same name and number, nothing written, not managed) is
+  // taken over now, not refused: otherwise the retry would say it exists and the channel would stay in Tunarr, unmanaged.
+  const half = existing.find((c) => c.number === o.number && slugOf(c.name) === slugOf(name) && c.duration === 0 && !managedIds.has(c.id));
+  const clash = half ? undefined : existing.find((c) => c.number === o.number || slugOf(c.name) === slugOf(name));
   if (clash) throw new ConsistencyError(`Tunarr already has a channel ${clash.number}, "${clash.name}": choose another ${clash.number === o.number ? 'number' : 'name'}`);
-  const yaml = newChannelFile({ ...o, name });
+  const yaml = newChannelFile({ ...o, name }, clock.now());
   const parsed = parseScheduleFile(yaml);
   // The lists must exist before anything is created in Tunarr.
   await resolveSchedule(parsed, cachedSource(client, store, clock));
-  const made = await client.createChannel({ name, number: o.number, startTime: Math.floor(clock.now() / gridOf(o.gridMinutes)) * gridOf(o.gridMinutes), stealth: o.hidden });
+  const made = half ?? await client.createChannel({ name, number: o.number, startTime: Math.floor(clock.now() / gridOf(o.gridMinutes, o.timezone, clock.now())) * gridOf(o.gridMinutes, o.timezone, clock.now()), stealth: o.hidden });
   return addChannel(deps, { yaml, tunarrChannel: made.id, floorMs: o.floorMs, stepMs: o.stepMs, seed: o.seed });
 }
 
@@ -694,6 +747,8 @@ export async function addChannel(deps: Pick<WorkerDeps, 'store' | 'client' | 'cl
   if (!ch) throw new ConsistencyError(`no Tunarr channel matches "${wanted}" (channels: ${channels.map((c) => c.name).join(', ')})`);
   const resolved = await resolveSchedule(parsed, cachedSource(client, store, clock));
   const places = placesFromLineup(resolved.schedule, await client.lineup(ch.id));
+  const already = store.channels().find((x) => x.tunarrId === ch.id);
+  if (already && already.name !== parsed.channel) throw new ConsistencyError(`the Tunarr channel "${ch.name}" is already managed here as "${already.name}"`);
   const edge = ch.startTime + ch.duration;
   store.addChannel({ name: parsed.channel, tunarrId: ch.id, floorMs: o.floorMs, stepMs: o.stepMs, schedule: o.yaml, state: emptyPlanState(o.seed), edge, at: clock.now() });
   return { name: parsed.channel, tunarrName: ch.name, edge, places, notes: resolved.notes, titles: resolved.titles };
@@ -842,7 +897,7 @@ export async function cursorPreview(
   if (!info) throw new ConsistencyError(`no ordered pool is called "${sequenceKey}" (known: ${listSequences(schedule).map((x) => x.key).join(', ') || 'none'})`);
   const before = placeInList(ch.state.sequences[sequenceKey] ?? { position: 0, history: 0 }, schedule.pools[info.pool]!.programs).seq;
   const after = adjustSequence(before, adjustment, info.length, schedule.pools[info.pool]!.programs);
-  const { from } = alignToGrid(ch.edge, schedule.grid);
+  const { from } = await planOrigin(deps, ch, schedule.grid);
   const to = from + (opts.days ?? 14) * 86_400_000;
   const { locked, pins, windows } = stagedInputs(store, ch, from, library, titles);
   const run = (seq: { position: number; history: number }) =>

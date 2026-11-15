@@ -8,7 +8,7 @@ import { addIds, adSettingsOf, languageName, applyAdSettings, applyScheduleModel
 import type { ChannelRecord, PinRecord, Store } from '@daytuner/store';
 import type { TunarrClient } from '@daytuner/tunarr-client';
 import {
-  adSamples, calendarPlan, stageRerun, poolStats, adjustCursor, adoptHistory, addChannel, createChannel, newChannelFile, GRID_CHOICES, cachedSource, cursorPreview, listSequences, resync, revisionImpact, stageCheck, stageDiff, stageEdit, stageGenerate,
+  adSamples, calendarPlan, stageRerun, poolStats, adjustCursor, adoptHistory, addChannel, createChannel, newChannelFile, gridsFor, cachedSource, cursorPreview, listSequences, resync, revisionImpact, stageCheck, stageDiff, stageEdit, stageGenerate,
   runAndRecord, stageRefresh, stageReset, topUp, type StageEdit, type StageResult,
 } from '@daytuner/worker';
 import { Jobs } from './jobs.js';
@@ -105,7 +105,8 @@ export function registerActions(app: Hono, d: ActionDeps): void {
   const gridOf = (b: Body): { gridMinutes?: number } => {
     if (b['gridMinutes'] === undefined) return {};
     const m = needInt(b, 'gridMinutes');
-    if (!(GRID_CHOICES as readonly number[]).includes(m)) throw new BadRequest(`"gridMinutes" must be one of ${GRID_CHOICES.join(', ')}`);
+    const fits = gridsFor(zone, d.clock.now());
+    if (!fits.includes(m)) throw new BadRequest(`"gridMinutes" must be one of ${fits.join(', ')} (the grids that fit the time zone ${zone})`);
     return { gridMinutes: m };
   };
   const addedOut = (r: Awaited<ReturnType<typeof addChannel>>) => ({ name: r.name, tunarrName: r.tunarrName, edge: r.edge, notes: r.notes });
@@ -116,7 +117,7 @@ export function registerActions(app: Hono, d: ActionDeps): void {
     const managed = new Set(d.store.channels().map((x) => x.tunarrId));
     return c.json({
       timezone: zone,
-      grids: GRID_CHOICES,
+      grids: gridsFor(zone, d.clock.now()),
       canCreate: d.writeClient !== undefined,
       nextNumber: Math.max(0, ...channels.map((x) => x.number)) + 1,
       lists: lists.map((l) => ({ name: l.name, count: l.count })).sort((a, b) => a.name.localeCompare(b.name)),
@@ -132,7 +133,7 @@ export function registerActions(app: Hono, d: ActionDeps): void {
     const found = (await d.client.channels()).find((x) => x.id === id);
     if (!found) throw new BadRequest('Tunarr has no such channel');
     if (d.store.channel(found.name)) throw new BadRequest(`DayTuner already manages a channel named "${found.name}"`);
-    const yaml = newChannelFile({ name: found.name, timezone: zone, ...lists, ...gridOf(b) });
+    const yaml = newChannelFile({ name: found.name, timezone: zone, ...lists, ...gridOf(b) }, d.clock.now());
     return job(c, found.name, 'attach channel', async () => addedOut(await addChannel(deps, { yaml, tunarrChannel: id, floorMs: 7 * 86_400_000, stepMs: 86_400_000, seed: 1 })));
   });
 

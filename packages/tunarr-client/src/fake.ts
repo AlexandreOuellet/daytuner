@@ -37,7 +37,7 @@ export class FakeTunarr {
 
   /** Channels created through POST /api/channels, as sent. */
   readonly created: Record<string, unknown>[] = [];
-  private readonly createdLineups = new Map<string, Record<string, unknown>[]>();
+  readonly createdLineups = new Map<string, Record<string, unknown>[]>();
   /** The lineup of the first channel that was created through the fake. */
   get createdLineup(): Record<string, unknown>[] {
     return this.createdLineups.get(String(this.created[0]?.['id'])) ?? [];

@@ -38,6 +38,8 @@ export function Calendar({ name, date: wanted }: { name: string; date?: string }
   const [version, setVersion] = useState(0);
   const [span, setSpan] = useState<(typeof SPANS)[number]>(1);
   const asked = useRef(new Set<string>());
+  /** Set when a change failed and the page is read again, so the reading does not clear the message that says why. */
+  const keepError = useRef(false);
   const side = useRef<HTMLElement>(null);
   const keepFrom = useRef<number | undefined>(undefined);
   const goTo = useRef<string | undefined>(undefined);
@@ -64,7 +66,7 @@ export function Calendar({ name, date: wanted }: { name: string; date?: string }
 
   useEffect(() => {
     if (!first || !lastDate) return;
-    setError(undefined);
+    if (keepError.current) keepError.current = false; else setError(undefined);
     void ensure(first);
     const end = weekStartOf(lastDate);
     if (end !== first) void ensure(end);
@@ -159,6 +161,10 @@ export function Calendar({ name, date: wanted }: { name: string; date?: string }
       setVersion((v) => v + 1);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+      // A change of several steps (a move is two) may have gone half way: read what the server holds, not what the page remembers.
+      keepError.current = true;
+      setWeeks({}); asked.current = new Set(); setSelected(undefined);
+      setVersion((v) => v + 1);
     } finally {
       setBusy(false);
     }

@@ -20,7 +20,10 @@ Both start from an **empty week** (no slots, no pools). The schedule page is whe
 plans nothing: a run says "no slots yet" and writes nothing, so the daily run cannot fill an empty channel with dead air.
 
 The form also asks for the **grid** (5, 10, 15, 20, 30 or 60 minutes; 15 by default), written into the channel's file; the
-channel's start time is rounded down to it.
+channel's start time is rounded down to it. The grid must fit the server's time zone: a slot sits on the zone's clock (20:00) and
+the lineup's grid lines on the epoch, and they agree only when the grid divides the zone's offset from UTC (all six do in Toronto
+or UTC; India, +5:30, allows 5, 10, 15 and 30). The page offers only the grids that fit, the server refuses the others, and a run
+for a channel file whose grid does not fit its zone stops with that reason before writing.
 
 ## What is not asked
 
@@ -47,7 +50,12 @@ channel's start time is rounded down to it.
 - A schedule with no slots plans nothing (the engine returns no slots; it used to refuse), so the daily run for a channel still
   waiting for its week writes nothing and says nothing is wrong. The schedule page cannot save a week with no slots, so the first
   save needs at least one.
-- Limit: the calendar plans from the channel's recorded end. For a channel that has sat empty for days the calendar shows days
-  before now as planned; the first run does not write them.
+- If a create fails after Tunarr made the channel (before DayTuner took it over), sending the form again takes that channel over: a
+  channel with the same name and number, no lineup and not managed here is adopted, not refused and not made twice. Attaching a
+  Tunarr channel that is already managed here under another name is refused.
+- Everything that plans ahead (the run, staging, the calendar, the cursor and revision previews) starts from the same place
+  (`originOf` / `planOrigin` in the worker): the grid line after the lineup's end, or, for a channel nothing was written to, the
+  grid line just before now. So the calendar and the staging never show days before now that the first run will not write, and
+  the episodes of an ordered show they show are the ones the run writes.
 - The channel page of a channel with no commits reads "needs attention" (nothing is committed ahead). That is true, and goes
   once a schedule is saved and run.

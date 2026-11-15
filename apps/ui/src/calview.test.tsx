@@ -95,6 +95,20 @@ describe('moving a whole slot', () => {
   });
 });
 
+describe('the wall clock on the day the clocks go back', () => {
+  // Toronto, 1 November 2026: 01:30 happens twice, at 05:30 UTC (still summer time) and again at 06:30 UTC.
+  const first = Date.UTC(2026, 10, 1, 5, 30);
+  const second = Date.UTC(2026, 10, 1, 6, 30);
+  it('draws both instants at the same place, and finds the right one again when told which it was near', () => {
+    expect(wallOf('America/Toronto', first)).toBe(wallOf('America/Toronto', second));
+    const wall = wallOf('America/Toronto', second);
+    expect(msOf('America/Toronto', wall, second)).toBe(second);
+    expect(msOf('America/Toronto', wall, first)).toBe(first);
+    expect(msOf('America/Toronto', wall)).toBe(first); // with nothing to go by, the earlier
+    expect(msOf('America/Toronto', wallOf('America/Toronto', Date.UTC(2026, 10, 1, 8, 0)), Date.UTC(2026, 10, 1, 8, 0))).toBe(Date.UTC(2026, 10, 1, 8, 0));
+  });
+});
+
 describe('the wall clock of a zone', () => {
   it('draws the channel hours: 20:00 in Toronto sits on the 20:00 line, in standard and summer time, and converts back', () => {
     for (const ms of [Date.UTC(2026, 11, 3, 1, 0), Date.UTC(2026, 6, 3, 0, 0)]) {
@@ -264,6 +278,41 @@ describe('the calendar page', () => {
     fireEvent.click(slotBox(day, 'Planned'));
     fireEvent.click(await screen.findByRole('button', { name: 'Move later' }));
     expect((await screen.findByRole('alert')).textContent).toContain('already in Tunarr');
+  });
+
+  it("does not show one channel's weeks in another's calendar when the channel changes while a week is still loading", async () => {
+    serve();
+    const real = globalThis.fetch;
+    let release!: () => void;
+    const held = new Promise<void>((r) => { release = r; });
+    vi.stubGlobal('fetch', async (url: string, init?: { method?: string; body?: string }) => {
+      if (url.endsWith('/calendar') && url.includes('Test%20Channel')) await held; // the first channel's week arrives late
+      if (url.endsWith('/calendar') && url.includes('Other')) return { ok: true, status: 202, json: async () => ({ job: { id: 'o', channel: 'Other', kind: 'k', state: 'done', message: 'done', result: { committedUntil: at(14), from: at(0), to: at(24 * 7), rerunnable: [], committed: [], titles: {}, clips: {}, slots: [] } } }) };
+      return real(url, init as never);
+    });
+    render(<App />);
+    await screen.findByText(/Planning this week/);
+    window.location.hash = calendarLink('Other', '2026-12-02');
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+    await screen.findByText(/Nothing is committed, staged or planned here/);
+    release();
+    await new Promise((r) => setTimeout(r, 300));
+    expect(screen.queryAllByLabelText(/^(Committed|Staged|Planned):/)).toHaveLength(0);
+    expect(screen.getByText(/Nothing is committed, staged or planned here/)).toBeTruthy();
+  });
+
+  it('reads the calendar again when a change fails part way, and keeps the message that says why', async () => {
+    const posts = serve();
+    const real = globalThis.fetch;
+    vi.stubGlobal('fetch', async (url: string, init?: { method?: string; body?: string }) =>
+      url.includes('/stage/edit') ? { ok: false, status: 409, json: async () => ({ error: 'the second edit was refused' }) } : real(url, init as never));
+    const day = await open();
+    expect(posts).toHaveLength(1);
+    fireEvent.click(slotBox(day, 'Planned'));
+    fireEvent.click(await screen.findByRole('button', { name: 'End later' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('refused');
+    await waitFor(() => expect(posts.length).toBeGreaterThan(1)); // what the server holds is read again
+    expect(screen.getByRole('alert').textContent).toContain('refused');
   });
 
   it('shows one, three or seven days', async () => {

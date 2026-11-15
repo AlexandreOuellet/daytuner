@@ -81,9 +81,14 @@ const offsetAt = (zone: string, ms: number): number => {
  */
 export const wallOf = (zone: string, ms: number): number => ms + offsetAt(zone, ms);
 
-/** The instant whose wall clock in `zone` reads `wall` (the inverse of `wallOf`). */
-export function msOf(zone: string, wall: number): number {
-  let t = wall;
-  for (let i = 0; i < 3; i++) t = wall - offsetAt(zone, t);
-  return t;
+/**
+ * The instant whose wall clock in `zone` reads `wall` (the inverse of `wallOf`). When the clocks go back an hour, a wall time
+ * happens twice: `near` says which one is meant (the instant it was before the change), and with nothing to go by the earlier is taken.
+ */
+export function msOf(zone: string, wall: number, near?: number): number {
+  const day = 24 * 3_600_000;
+  const candidates = [...new Set([wall - offsetAt(zone, wall - day), wall - offsetAt(zone, wall + day)])].filter((t) => wallOf(zone, t) === wall).sort((a, b) => a - b);
+  if (candidates.length === 0) { let t = wall; for (let i = 0; i < 3; i++) t = wall - offsetAt(zone, t); return t; } // a time that does not happen (the clocks went forward)
+  if (near === undefined) return candidates[0]!;
+  return candidates.reduce((best, t) => (Math.abs(t - near) < Math.abs(best - near) ? t : best));
 }

@@ -11,7 +11,7 @@ export interface DaySelection { key: string; block?: number }
 
 const PLACE_WORD = { committed: 'Committed', staged: 'Staged', planned: 'Planned' } as const;
 const wallIso = (zone: string, ms: number): string => new Date(wallOf(zone, ms)).toISOString();
-const absOf = (zone: string, d: Date): number => msOf(zone, d.getTime());
+const absOf = (zone: string, d: Date, near: number): number => msOf(zone, d.getTime(), near);
 
 interface Props {
   entries: Entry[];
@@ -138,17 +138,17 @@ export function CalGrid({ entries, zone, from, days, titles, clips, selected, on
             const e = byKey.get(arg.event.extendedProps['key'] as string);
             const start = arg.event.start;
             arg.revert(); // the page redraws from its own state, which is the one source of truth
-            if (e && start) onMove(e, absOf(zone, start));
+            if (e && start) onMove(e, absOf(zone, start, e.start));
           }}
           eventResize={(arg: EventResizeDoneArg) => {
             const e = byKey.get(arg.event.extendedProps['key'] as string);
             const { start, end } = arg.event;
             arg.revert();
             if (!e || !start || !end) return;
-            const s = absOf(zone, start);
-            const t = absOf(zone, end);
-            if (t !== e.end) onEdge(e, 'end', t);
-            else if (s !== e.start) onEdge(e, 'start', s);
+            // An edge that was not touched is told by its place on the grid, not by converting it back (on the day the clocks go back
+            // that place is two instants, and the wrong one would read as a change).
+            if (end.getTime() !== wallOf(zone, e.end)) onEdge(e, 'end', absOf(zone, end, e.end));
+            else if (start.getTime() !== wallOf(zone, e.start)) onEdge(e, 'start', absOf(zone, start, e.start));
           }}
         />
       </div>

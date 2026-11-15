@@ -53,7 +53,10 @@ Seen on the hidden channel of the real server after 3 commits (about 22 days, 6,
 their real lengths (`29976.961`), not the whole milliseconds that were written, so the channel's `duration` ended 139 ms short of
 the end DayTuner recorded. A worker that insists on an exact match stops for good. It now carries on when the drift is under a
 second and the next grid line is the same one, says so in the run's notes (`edge-drift`), and brings the next slot back to the
-grid with a flex. A bigger drift, or one that crosses a grid line, is still treated as a change made outside DayTuner.
+grid with a flex. A drift can also be the other way: a clip read back a fraction longer than written leaves the end a few
+milliseconds past the grid line DayTuner wrote to. That is carried on too, but the next slot cannot start before the line after, so
+it costs a whole grid step of flex and is reported as a warning (`edge-drift`), not a note. A drift of a second or more, or one
+the store did not write to a grid line, is still treated as a change made outside DayTuner.
 Not known: whether playback follows the stored or the real lengths between the commits (the guide stays within the drift).
 
 ## Guide and playback checks (test copy)

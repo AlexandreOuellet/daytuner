@@ -352,6 +352,28 @@ describe('the schedule designer', () => {
     void posts;
   });
 
+  it('keeps a comma while a list is typed one character at a time, in a rule box and in the shows left out', async () => {
+    const posts = serve(undefined, {
+      french: { raw: { movies: { match: [{ genre: 'Comedy' }] } }, order: 'shuffle' },
+      comedy: { raw: { shows: ['Show A', { match: { genre: 'Comedy' } }] } },
+    });
+    render(<App />);
+    await screen.findByRole('group', { name: 'The week' });
+    const typeIn = (box: HTMLInputElement, text: string): void => { for (const ch of text) fireEvent.change(box, { target: { value: box.value + ch } }); }; // a key adds to what the box shows now
+    const genre = screen.getByLabelText('french rule 1: Genre') as HTMLInputElement;
+    fireEvent.change(genre, { target: { value: '' } });
+    typeIn(genre, 'Comedy, Horror');
+    expect(genre.value).toBe('Comedy, Horror');
+    const left = screen.getByLabelText('comedy entry 2: shows left out') as HTMLInputElement;
+    typeIn(left, 'Archer, Lucifer');
+    expect(left.value).toBe('Archer, Lucifer');
+    fireEvent.click(screen.getByText('Save as a new revision', { selector: 'button' }));
+    await screen.findByText(/Saved as revision/);
+    const pools = saves(posts).at(-1)!.body.pools;
+    expect(pools.french.raw.movies.match).toEqual({ genre: ['Comedy', 'Horror'] });
+    expect(pools.comedy.raw.shows[1].except).toEqual([{ show: 'Archer' }, { show: 'Lucifer' }]);
+  });
+
   it('will not save over locked slots until told to, and can discard changes', async () => {
     const posts = serve((b) => (b.force ? { saved: true, revision: 2 } : { saved: false, revision: 1, impact: { conflicts: [{ start: 1, reason: 'window-changed', message: 'no slot starts there any more' }], changes: [], staged: 2 } }));
     render(<App />);

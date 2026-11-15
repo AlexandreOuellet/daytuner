@@ -15,7 +15,7 @@ are in [`roadmap.md`](roadmap.md); verified Tunarr facts are in [`tunarr-api.md`
 | 4 Schedules and staging | built, verified on the test copy | Design settled (architecture.md, "Phase 4 storage"). Revisions and all six slices of staging (store, `stage generate|show|clear|lock|unlock|pin|unpin`, locked slots committed as stored, lock conflicts, pins, conflicts shown by `stage show`, `stage delete|resize|add`) built), the preview diff and the revision dry-run against locked slots built; staging was run on the test copy and a locked, a pinned and an added slot were committed and read back identical (see `tunarr-api.md`) |
 | 5 Web interface | built, being tried | The dashboard, channel and add-a-channel pages, cursors, ads, the schedule designer with pool rules, the calendar (one to seven days as a time grid), and the staging editor. Tried on the test copy; not yet on a real channel |
 
-Tests: all pass across the engine (174), client (27), store (32), schedule (74), worker (78), web (36), UI (88) and CLI (22),
+Tests: all pass across the engine (176), client (27), store (32), schedule (74), worker (88), web (37), UI (101) and CLI (22),
 plus 3 client integration tests that run only against a real Tunarr (`TUNARR_URL`).
 
 ## Needed for 1.0
@@ -76,6 +76,7 @@ Each is one of: **build** (clear what to do), **verify** (find out), **know** (a
 - **know** Ad and filler clip playback depends on Tunarr having the clip folder mounted; DayTuner does not read it. Without it each break fails to play (see `deploy.md`).
 - **build** Saving a week takes about 14 s (a check, then a save, each planning); the save could reuse the check's plan.
 - **build** The schedule page cannot save a week with no slots, so a new channel needs one slot before its first save; an empty channel's page says "needs attention" until then.
+- **know** A grid must divide the time zone's offset from UTC (see `web-channels.md`); the page offers only those, and a hand-written channel file that breaks it is refused at the run with the reason.
 - **know** The calendar grid draws each instant as its wall clock, so on the day the clocks change the hours after the change are drawn an hour off.
 - **build** On the calendar: skipping a block, changing a break's ads, a specific place-moved note, and a warning for unlinked slots of one pool; slot display names.
 - **know** A lineup whose end is fractional (older lineups) gets one rounded flex to the next grid
