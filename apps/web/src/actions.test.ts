@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
+import { parseScheduleFile } from '@daytuner/schedule';
 import { Store } from '@daytuner/store';
 import { FakeTunarr, TunarrClient } from '@daytuner/tunarr-client';
 import { createApp } from './app.js';
@@ -104,6 +105,11 @@ describe('actions', () => {
     expect((await t.post('/api/channels/Test/stage/pin', { start: movie.start, block: 0, program: 'movie:Movie 3' })).status).toBe(400);
     expect((await t.job('/api/channels/Test/stage/pin', { start: movie.start, block: 1, program: 'movie:Nope' })).state).toBe('failed');
     expect((await t.job('/api/channels/Test/stage/unpin', { start: movie.start, block: 1 })).state).toBe('done');
+
+    // A rerun pins the earlier episode of an ordered show; it needs an ordered pool, and the fields.
+    expect((await t.post('/api/channels/Test/stage/rerun', { start: movie.start, block: 0, pool: 'sitcoms', programId: 'ep5' })).status).toBe(400);
+    expect((await t.post('/api/channels/Test/stage/rerun', { start: movie.start, block: 1, pool: 'sitcoms' })).status).toBe(400);
+    expect((await t.job('/api/channels/Test/stage/rerun', { start: movie.start, block: 1, pool: 'movies', programId: 'mov1' })).state).toBe('failed');
 
     const big = full.find((s: any) => s.end - s.start >= 6 * 60 * MIN);
     const add = await t.job('/api/channels/Test/stage/edit', { kind: 'add', start: big.start + 60 * MIN, end: big.start + 120 * MIN, program: 'episode:Show A/Ep 9' });
@@ -230,14 +236,14 @@ describe('actions', () => {
     await t.job('/api/channels/Test/stage/generate', { to: edge + 4 * DAY });
     const movie = (await t.get('/api/channels/Test/staged')).body.find((s: any) => s.pool === 'movies' && s.start > edge + 30 * MIN);
     await t.post('/api/channels/Test/stage/lock', { start: movie.start, locked: true });
-    const week = got.model.week.map((s: any) => (s.pool === 'movies' ? { ...s, at: s.at + 3_600_000 } : s));
+    const week = got.model.week.map((s: any) => (s.pool === 'movies' ? { ...s, at: s.at + 3_600_000, length: s.length - 3_600_000 } : s)); // starts an hour later, so there is an hour gap, played from the fill pool
 
-    const check = await t.job('/api/channels/Test/schedule/model', { week, pools: got.model.pools, check: true });
+    const check = await t.job('/api/channels/Test/schedule/model', { week, pools: got.model.pools, fill: 'sitcoms', check: true });
     expect((check.result as any).impact.conflicts.length).toBe(1);
     expect(t.store.channel('Test')!.revision).toBe(1);
-    const refused = await t.job('/api/channels/Test/schedule/model', { week, pools: got.model.pools });
+    const refused = await t.job('/api/channels/Test/schedule/model', { week, pools: got.model.pools, fill: 'sitcoms' });
     expect(refused.result).toMatchObject({ saved: false });
-    const saved = await t.job('/api/channels/Test/schedule/model', { week, pools: got.model.pools, force: true });
+    const saved = await t.job('/api/channels/Test/schedule/model', { week, pools: got.model.pools, fill: 'sitcoms', force: true });
     expect(saved.result).toMatchObject({ saved: true, revision: 2 });
     expect((await t.get('/api/channels/Test/schedule/model')).body.model.week.find((s: any) => s.pool === 'movies').at).toBe(21 * 3_600_000);
 
@@ -283,7 +289,9 @@ describe('actions', () => {
     expect(stats.odd.durations.every((x: number) => x <= 90 * MIN)).toBe(true);
     expect((await t.post('/api/channels/Test/pools/stats', {})).status).toBe(400);
     const lib = (await t.get('/api/library')).body;
-    expect(lib).toEqual({ shows: [{ id: 'show-a', title: 'Show A' }], genres: ['Comedy'] });
+    expect(lib).toMatchObject({ shows: [{ id: 'show-a', title: 'Show A' }], genres: ['Comedy'] });
+    expect(lib.values.genre).toEqual([{ value: 'Comedy' }]);
+    expect(lib.values).toHaveProperty('audio');
   });
 
   it('plans with a dry run, and will not write unless the server was started with writing on', async () => {
@@ -306,6 +314,45 @@ describe('actions', () => {
     expect(done).toMatchObject({ state: 'done', result: { action: 'appended' } });
     expect(w.fake.lineup.length).toBeGreaterThan(before);
     expect(((await w.get('/api/channels/Test/commits')).body)[0]).toMatchObject({ status: 'done' });
+  });
+
+  it('adds a channel from the page: attaches a Tunarr channel that exists (writing off), or creates a new hidden one (writing on)', async () => {
+    t.fake.created.push({ id: 'old-1', number: 7, name: 'Old Channel', startTime: NOW - 3 * DAY, duration: 0 });
+    const info = (await t.get('/api/add-channel')).body;
+    expect(info).toMatchObject({ canCreate: false, nextNumber: 8, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone });
+    expect(info.channels).toEqual([{ id: 'old-1', number: 7, name: 'Old Channel' }]); // Test is already managed
+    expect(info.lists.map((l: { name: string }) => l.name)).toEqual(['Ads', 'Fillers']);
+    expect((await t.post('/api/add-channel/attach', { tunarrChannel: 'old-1', adList: 'Nope' })).status).toBe(400);
+    const done = await t.job('/api/add-channel/attach', { tunarrChannel: 'old-1', adList: 'Ads', fillerList: 'Fillers' });
+    expect(done).toMatchObject({ state: 'done', result: { name: 'Old Channel' } });
+    const file = parseScheduleFile(t.store.channel('Old Channel')!.schedule);
+    expect(file).toMatchObject({ grid: 15 * MIN, week: {} });
+    expect(file.ads.mid?.list).toBe('Ads');
+    expect((await t.post('/api/add-channel/attach', { tunarrChannel: 'old-1' })).status).toBe(400); // already managed
+    // creating needs writing on
+    const refused = await t.post('/api/add-channel/create', { name: 'Late Night', number: 9 });
+    expect(refused.status).toBe(403);
+    expect(t.fake.created).toHaveLength(1);
+  });
+
+  it('creates a channel in Tunarr and in the store when writing is on, hidden unless asked otherwise', async () => {
+    const w = build(true);
+    await w.job('/api/channels', { yaml: YAML });
+    expect((await w.get('/api/add-channel')).body.canCreate).toBe(true);
+    const bad = await w.post('/api/add-channel/create', { name: 'Clash', number: 1 });
+    expect(bad.status).toBe(202);
+    expect(await w.jobs.settled(bad.body.job.id)).toMatchObject({ state: 'failed' });
+    const done = await w.job('/api/add-channel/create', { name: 'Late Night', number: 9, adList: 'Ads' });
+    expect(done).toMatchObject({ state: 'done', result: { name: 'Late Night' } });
+    expect(w.fake.created[0]).toMatchObject({ name: 'Late Night', number: 9, stealth: true, duration: 0 });
+    expect(w.store.channel('Late Night')).toBeDefined();
+    expect((await w.post('/api/add-channel/create', { name: 'Odd', number: 11, gridMinutes: 7 })).status).toBe(400);
+    const shown = await w.job('/api/add-channel/create', { name: 'Shown', number: 10, hidden: false, gridMinutes: 60 });
+    expect(shown.state).toBe('done');
+    expect(w.fake.created[1]).toMatchObject({ stealth: false });
+    expect(parseScheduleFile(w.store.channel('Shown')!.schedule).grid).toBe(60 * MIN);
+    expect((await w.get('/api/add-channel')).body.grids).toEqual([5, 10, 15, 20, 30, 60]);
+    expect((await w.post('/api/add-channel/create', { name: 'No number' })).status).toBe(400);
   });
 
   it('resyncs, adopts history, and exports the schedule with ids', async () => {

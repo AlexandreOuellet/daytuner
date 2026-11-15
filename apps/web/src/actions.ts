@@ -3,12 +3,12 @@
 // Tunarr except `run`, and that only when the server was started with writing switched on.
 
 import type { Context, Hono } from 'hono';
-import type { Clock } from '@daytuner/engine';
-import { addIds, adSettingsOf, applyAdSettings, applyScheduleModel, exceptionOccurrences, scheduleModelOf, type ExceptionModel, type ScheduleModel, findProgram, parseLocalDateTime, parseScheduleFile, resolveSchedule, type AdSettings } from '@daytuner/schedule';
+import { placeInList, type Clock } from '@daytuner/engine';
+import { addIds, adSettingsOf, languageName, applyAdSettings, applyScheduleModel, exceptionOccurrences, scheduleModelOf, type ExceptionModel, type ScheduleModel, findProgram, parseLocalDateTime, parseScheduleFile, resolveSchedule, type AdSettings } from '@daytuner/schedule';
 import type { ChannelRecord, PinRecord, Store } from '@daytuner/store';
 import type { TunarrClient } from '@daytuner/tunarr-client';
 import {
-  adSamples, poolStats, adjustCursor, adoptHistory, addChannel, cachedSource, cursorPreview, listSequences, resync, revisionImpact, stageCheck, stageDiff, stageEdit, stageGenerate,
+  adSamples, calendarPlan, stageRerun, poolStats, adjustCursor, adoptHistory, addChannel, createChannel, newChannelFile, GRID_CHOICES, cachedSource, cursorPreview, listSequences, resync, revisionImpact, stageCheck, stageDiff, stageEdit, stageGenerate,
   runAndRecord, stageRefresh, stageReset, topUp, type StageEdit, type StageResult,
 } from '@daytuner/worker';
 import { Jobs } from './jobs.js';
@@ -24,6 +24,8 @@ export interface ActionDeps {
   client: TunarrClient;
   /** Writes to Tunarr. Present only when the server was started with writing switched on. */
   writeClient?: TunarrClient;
+  /** The server's time zone, for the channels it creates. Defaults to the system's. */
+  timezone?: string;
   channel(name: string): ChannelRecord;
 }
 
@@ -85,6 +87,68 @@ export function registerActions(app: Hono, d: ActionDeps): void {
     });
   });
 
+  // Adding a channel from the page: attach a Tunarr channel that exists, or create a new one (see docs/web-channels.md).
+  const zone = d.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const listNames = async (b: Body): Promise<{ adList?: string; fillerList?: string }> => {
+    const names = new Set((await d.client.fillerLists()).map((l) => l.name));
+    const pick = (k: string): string | undefined => {
+      const v = b[k];
+      if (v === undefined || v === null || v === '') return undefined;
+      if (typeof v !== 'string') throw new BadRequest(`"${k}" must be the name of a list`);
+      if (!names.has(v)) throw new BadRequest(`Tunarr has no list named "${v}"`);
+      return v;
+    };
+    const adList = pick('adList');
+    const fillerList = pick('fillerList');
+    return { ...(adList ? { adList } : {}), ...(fillerList ? { fillerList } : {}) };
+  };
+  const gridOf = (b: Body): { gridMinutes?: number } => {
+    if (b['gridMinutes'] === undefined) return {};
+    const m = needInt(b, 'gridMinutes');
+    if (!(GRID_CHOICES as readonly number[]).includes(m)) throw new BadRequest(`"gridMinutes" must be one of ${GRID_CHOICES.join(', ')}`);
+    return { gridMinutes: m };
+  };
+  const addedOut = (r: Awaited<ReturnType<typeof addChannel>>) => ({ name: r.name, tunarrName: r.tunarrName, edge: r.edge, notes: r.notes });
+
+  /** What the add-a-channel page needs: the Tunarr channels not yet managed, the next free number, the lists, the zone. */
+  app.get('/api/add-channel', async (c) => {
+    const [channels, lists] = await Promise.all([d.client.channels(), d.client.fillerLists()]);
+    const managed = new Set(d.store.channels().map((x) => x.tunarrId));
+    return c.json({
+      timezone: zone,
+      grids: GRID_CHOICES,
+      canCreate: d.writeClient !== undefined,
+      nextNumber: Math.max(0, ...channels.map((x) => x.number)) + 1,
+      lists: lists.map((l) => ({ name: l.name, count: l.count })).sort((a, b) => a.name.localeCompare(b.name)),
+      channels: channels.filter((x) => !managed.has(x.id)).map((x) => ({ id: x.id, number: x.number, name: x.name })).sort((a, b) => a.number - b.number),
+    });
+  });
+
+  /** Attaches a Tunarr channel that exists, with an empty week. Only reads Tunarr. */
+  app.post('/api/add-channel/attach', async (c) => {
+    const b = await bodyOf(c);
+    const id = needString(b, 'tunarrChannel');
+    const lists = await listNames(b);
+    const found = (await d.client.channels()).find((x) => x.id === id);
+    if (!found) throw new BadRequest('Tunarr has no such channel');
+    if (d.store.channel(found.name)) throw new BadRequest(`DayTuner already manages a channel named "${found.name}"`);
+    const yaml = newChannelFile({ name: found.name, timezone: zone, ...lists, ...gridOf(b) });
+    return job(c, found.name, 'attach channel', async () => addedOut(await addChannel(deps, { yaml, tunarrChannel: id, floorMs: 7 * 86_400_000, stepMs: 86_400_000, seed: 1 })));
+  });
+
+  /** Creates a new, empty channel in Tunarr and adds it, with an empty week. The one place DayTuner creates a channel. */
+  app.post('/api/add-channel/create', async (c) => {
+    if (!d.writeClient) throw new Forbidden('writing to Tunarr is switched off on this server (start it with DAYTUNER_ALLOW_WRITES=1)');
+    const b = await bodyOf(c);
+    const name = needString(b, 'name').trim();
+    const number = needInt(b, 'number');
+    const hidden = b['hidden'] !== false;
+    const lists = await listNames(b);
+    const grid = gridOf(b);
+    const wdeps = { store: d.store, client: d.writeClient, clock: d.clock };
+    return job(c, name, 'create channel', async () => addedOut(await createChannel(wdeps, { name, number, hidden, timezone: zone, ...lists, ...grid, floorMs: 7 * 86_400_000, stepMs: 86_400_000, seed: 1 })));
+  });
+
   app.post('/api/channels/:name/stage/generate', async (c) => {
     const ch = d.channel(c.req.param('name'));
     const b = await bodyOf(c);
@@ -126,6 +190,18 @@ export function registerActions(app: Hono, d: ActionDeps): void {
       d.store.setPin(ch.name, start, block, program);
       return stageOut(await stageRefresh(deps, ch.name, start));
     });
+  });
+
+  /** Plays the earlier episode of an ordered show in a block (a rerun). The slot must be staged. */
+  app.post('/api/channels/:name/stage/rerun', async (c) => {
+    const ch = d.channel(c.req.param('name'));
+    const b = await bodyOf(c);
+    const start = when(zoneOf(ch), b, 'start')!;
+    const block = needInt(b, 'block');
+    if (block < 1) throw new BadRequest('"block" is a whole number from 1');
+    const pool = needString(b, 'pool');
+    const programId = needString(b, 'programId');
+    return job(c, ch.name, 'rerun', async () => stageOut(await stageRerun(deps, ch.name, { start, block, pool, programId })));
   });
 
   app.post('/api/channels/:name/stage/unpin', async (c) => {
@@ -219,7 +295,7 @@ export function registerActions(app: Hono, d: ActionDeps): void {
   app.post('/api/channels/:name/schedule/model', async (c) => {
     const ch = d.channel(c.req.param('name'));
     const b = await bodyOf(c);
-    const m = b as unknown as Pick<ScheduleModel, 'week' | 'pools'> & { exceptions?: ExceptionModel[] };
+    const m = b as unknown as Pick<ScheduleModel, 'week' | 'pools'> & { templates?: ScheduleModel['templates']; fill?: string | null; exceptions?: ExceptionModel[] };
     if (!Array.isArray(m.week) || typeof m.pools !== 'object' || m.pools === null) throw new BadRequest('the request needs "week" (a list of slots) and "pools"');
     let yaml: string;
     try {
@@ -276,13 +352,41 @@ export function registerActions(app: Hono, d: ActionDeps): void {
     return job(c, ch.name, 'read pools', async () => poolStats(d.client, pools as Parameters<typeof poolStats>[1]));
   });
 
-  /** The shows and movie genres the library has, for pickers. */
-  let libraryCache: { at: number; value: { shows: { id: string; title: string }[]; genres: string[] } } | undefined;
+  /** What will air in a range: committed, staged and planned slots, with the plan for comparison where they differ. Writes nothing. */
+  app.post('/api/channels/:name/calendar', async (c) => {
+    const ch = d.channel(c.req.param('name'));
+    const b = await bodyOf(c);
+    const zone = zoneOf(ch);
+    const from = when(zone, b, 'from')!;
+    const to = when(zone, b, 'to')!;
+    return job(c, ch.name, 'plan the calendar', async () => calendarPlan(deps, ch.name, { from, to }));
+  });
+
+  /** The shows and movie genres the library has, and the values a rule can name (genre, rating, studio, ...), for pickers. */
+  type LibraryValues = Record<'genre' | 'rating' | 'studio' | 'tag' | 'actor' | 'director' | 'audio' | 'subtitles', { value: string; label?: string }[]>;
+  let libraryCache: { at: number; value: { shows: { id: string; title: string }[]; genres: string[]; values: LibraryValues } } | undefined;
   app.get('/api/library', async (c) => {
     if (!libraryCache || d.clock.now() - libraryCache.at > 60_000) {
-      const [shows, movies] = await Promise.all([d.client.shows(), d.client.movies()]);
+      const [shows, movies, showGenres, audio, subs] = await Promise.all([
+        d.client.shows(), d.client.movies(), d.client.facetValues('grandparent.genres'),
+        d.client.facetValues('audioLanguages'), d.client.facetValues('subtitleLanguages'),
+      ]);
       const genres = [...new Set(movies.flatMap((m) => m.genres))].sort((a, b) => a.localeCompare(b));
-      libraryCache = { at: d.clock.now(), value: { shows: shows.map((x) => ({ id: x.id, title: x.title })).sort((a, b) => a.title.localeCompare(b.title)), genres } };
+      const sorted = (xs: Iterable<string>): { value: string }[] =>
+        [...new Set([...xs].filter((x) => x !== ''))].sort((a, b) => a.localeCompare(b)).map((value) => ({ value }));
+      const language = (codes: string[]): { value: string; label?: string }[] =>
+        codes.filter((x) => x !== 'und').sort().map((value) => ({ value, ...(languageName(value) === value ? {} : { label: `${languageName(value)} (${value})` }) }));
+      const values: LibraryValues = {
+        genre: sorted([...genres, ...showGenres.flatMap((g) => g.split(';').map((x) => x.trim()))]),
+        rating: sorted([...movies.map((m) => m.rating ?? ''), ...shows.map((x) => x.rating ?? '')]),
+        studio: sorted([...movies.flatMap((m) => m.studios), ...shows.flatMap((x) => x.studios)]),
+        tag: sorted([...movies.flatMap((m) => m.tags), ...shows.flatMap((x) => x.tags)]),
+        actor: sorted([...movies.flatMap((m) => m.actors), ...shows.flatMap((x) => x.actors)]),
+        director: sorted(movies.flatMap((m) => m.directors)),
+        audio: language(audio),
+        subtitles: language(subs),
+      };
+      libraryCache = { at: d.clock.now(), value: { shows: shows.map((x) => ({ id: x.id, title: x.title })).sort((a, b) => a.title.localeCompare(b.title)), genres, values } };
     }
     return c.json(libraryCache.value);
   });
@@ -336,7 +440,7 @@ export function registerActions(app: Hono, d: ActionDeps): void {
     const { schedule, titles } = await resolveSchedule(parseScheduleFile(ch.schedule), cachedSource(d.client, d.store, d.clock));
     return c.json(
       listSequences(schedule).map((s) => {
-        const st = ch.state.sequences[s.key] ?? { position: 0, history: 0 };
+        const st = placeInList(ch.state.sequences[s.key] ?? { position: 0, history: 0 }, schedule.pools[s.pool]!.programs).seq;
         const id = schedule.pools[s.pool]!.programs[st.position];
         const slotInfo = s.slots.map((slot) => ({ id: slot, mode: schedule.week.find((w) => `${w.day}@${w.at}` === slot)?.link?.mode === 'rerun' ? ('rerun' as const) : ('continue' as const) }));
         // The episodes it plays in a week: what "missed a week" rewinds by. A rerun replays, so it does not count.

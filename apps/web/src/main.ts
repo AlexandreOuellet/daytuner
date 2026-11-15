@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { serve } from '@hono/node-server';
 import { Store } from '@daytuner/store';
 import { TunarrClient } from '@daytuner/tunarr-client';
+import { warmCalendar } from '@daytuner/worker';
 import { createApp } from './app.js';
 import { Jobs } from './jobs.js';
 import { Scheduler } from './scheduler.js';
@@ -37,7 +38,10 @@ if (writeClient) {
   new Scheduler({ store, clock, jobs, writeClient, log: (m) => console.log(`scheduled run: ${m}`) }).start();
   console.log('The daily run is on: each channel is run at its own time (see its settings).');
 }
+const readClient = new TunarrClient(tunarr);
 serve({ fetch: app.fetch, hostname: host, port }, (info) => {
+  // Read what the calendar needs in the background, one channel at a time, so the first visit is not the slow one.
+  void (async () => { for (const ch of store.channels()) await warmCalendar({ store, client: readClient, clock }, ch.name); })();
   if (!existsSync(uiDir)) console.log('The pages are not built yet (pnpm --filter @daytuner/ui build): only the API is served.');
   console.log(`DayTuner listening on http://${info.address}:${info.port} (${writesEnabled ? 'may write to Tunarr' : 'read only'})`);
   if (host !== '127.0.0.1' && host !== 'localhost') console.log('Note: this server has no login. Only expose it to people who may change your lineups.');

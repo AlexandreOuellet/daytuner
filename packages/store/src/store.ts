@@ -235,6 +235,11 @@ create table if not exists chapter_cache (
   chapters text not null,
   fetched_at integer not null
 );
+create table if not exists pool_seen (
+  channel_id integer primary key references channels(id),
+  pools text not null,
+  at integer not null
+);
 create table if not exists commit_metrics (
   commit_id integer primary key references commits(id),
   metrics text not null,
@@ -519,7 +524,7 @@ export class Store {
    */
   applyAdjustment(
     name: string,
-    a: { at: number; sequenceKey: string; kind: 'rewind' | 'set'; amount: number; positionBefore: number; next: { position: number; history: number } },
+    a: { at: number; sequenceKey: string; kind: 'rewind' | 'set'; amount: number; positionBefore: number; next: { position: number; history: number; last?: string } },
   ): void {
     this.tx(() => {
       const ch = this.channel(name);
@@ -673,6 +678,16 @@ export class Store {
   /** Forgets every cached chapter list, so the next plan reads them again. Returns how many were dropped. */
   clearChapterCache(): number {
     return Number(this.db.prepare('delete from chapter_cache').run().changes);
+  }
+
+  /** The programs each pool held when the channel was last planned for real, or undefined before the first time. */
+  poolsSeen(channelId: number): Record<string, string[]> | undefined {
+    const r = this.db.prepare('select pools from pool_seen where channel_id = ?').get(channelId) as Row | undefined;
+    return r ? (JSON.parse(String(r['pools'])) as Record<string, string[]>) : undefined;
+  }
+
+  setPoolsSeen(channelId: number, pools: Record<string, string[]>, at: number): void {
+    this.db.prepare('insert or replace into pool_seen (channel_id, pools, at) values (?, ?, ?)').run(channelId, JSON.stringify(pools), at);
   }
 
   commits(channelId: number, limit = 50): CommitRecord[] {

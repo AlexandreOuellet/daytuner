@@ -43,6 +43,9 @@ exceptions:                      # special events; they win over the week for th
     play: { movie: The Nightmare Before Christmas }
     counts: kids-movies          # counts against this shuffled pool (the default when the movie is in it)
 
+# A slot lasts until the next slot starts. To give one its own length, add `length: 2h`; time no slot covers then plays the
+# `fill` pool (add `fill: <a pool name>` above `week`). `templates:` holds named slots for the schedule designer (the web page):
+#   templates: { Sitcom block: { length: 2h, pool: <a pool name> } }
 week:                            # day 0 is Sunday
   sun:
     - { at: "00:00", pool: office-hours }   # add `link: office, linkMode: continue|rerun`: continue shares one head; rerun replays the episodes behind it

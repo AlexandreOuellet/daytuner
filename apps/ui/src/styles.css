@@ -18,7 +18,7 @@ a { color: var(--accent); }
 h1 { font-size: 1.5rem; margin: 0; }
 h2 { font-size: 1.05rem; margin: 1.5rem 0 .5rem; }
 code { background: var(--grid); padding: 1px 5px; border-radius: 4px; }
-main { max-width: 1100px; margin: 0 auto; padding: var(--gutter); }
+main { max-width: 2000px; margin: 0 auto; padding: var(--gutter); }
 .top { display: flex; align-items: center; gap: 20px; padding: 10px var(--gutter); background: var(--surface); border-bottom: 1px solid var(--line); }
 .brand { font-weight: 700; text-decoration: none; color: var(--ink); }
 .top nav { flex: 1; }
@@ -104,19 +104,11 @@ button.primary { background: var(--accent); color: var(--bg); border-color: var(
 .swatch.interstitial { background: repeating-linear-gradient(45deg, var(--grid), var(--grid) 3px, var(--surface) 3px, var(--surface) 6px); }
 .swatch.dead-air { background: var(--ink-3); }
 
-.weekgrid { display: grid; grid-template-columns: 44px repeat(7, minmax(92px, 1fr)); gap: 4px; margin: 12px 0; overflow-x: auto; overflow-y: hidden; padding-bottom: 2px; }
-.weekgrid .dayhead { text-align: center; font-weight: 600; font-size: .85rem; padding: 4px 0; color: var(--ink-2); }
 .axis-body, .daycol { position: relative; }
 .axis-body span { position: absolute; right: 4px; font-size: .7rem; color: var(--ink-3); transform: translateY(-50%); }
 .daycol { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
 .hline { position: absolute; left: 0; right: 0; border-top: 1px solid var(--grid); }
-.slotblock { position: absolute; left: 2px; right: 2px; border-radius: 6px; overflow: hidden; border-left: 4px solid hsl(var(--h) 60% 45%); background: color-mix(in srgb, hsl(var(--h) 65% 50%) 26%, var(--surface)); }
-.slotblock.carry { opacity: .55; border-left-style: dashed; }
-.slotblock.picked { outline: 2px solid var(--accent); z-index: 2; }
-.slotbtn { all: unset; box-sizing: border-box; display: flex; flex-direction: column; gap: 1px; width: 100%; height: 100%; padding: 4px 6px 4px 6px; cursor: pointer; font-size: .75rem; line-height: 1.2; overflow: hidden; color: var(--ink); }
-.slotbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.slotbtn .when { color: var(--ink-2); } .slotbtn .chip { font-size: .68rem; align-self: flex-start; } .slotbtn .note { position: absolute; top: 2px; right: 6px; color: var(--warn); font-weight: 700; }
-.handle { position: absolute; top: 0; left: 0; right: 0; height: 8px; cursor: ns-resize; touch-action: none; background: linear-gradient(to bottom, color-mix(in srgb, var(--ink) 25%, transparent), transparent); }
+.handle { position: absolute; top: 0; left: 0; right: 0; height: 10px; cursor: ns-resize; touch-action: none; background: linear-gradient(to bottom, color-mix(in srgb, var(--ink) 25%, transparent), transparent); }
 .row { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; }
 .pools { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: var(--gutter); }
 .poolcard { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; } .poolcard h3 { margin: 0; font-size: 1rem; }
@@ -161,3 +153,144 @@ button.primary { background: var(--accent); color: var(--bg); border-color: var(
 .blockpanel { border-top: 1px solid var(--line); padding-top: 8px; width: 100%; } .blockpanel h3 { margin: 0 0 6px; font-size: .95rem; }
 .changes { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 14px; margin: 14px 0; } .changes h3 { margin: 0 0 6px; font-size: 1rem; }
 .changes ul { list-style: none; padding: 0; margin: 0; } .changes li { padding: 5px 0; border-bottom: 1px solid var(--line); }
+
+
+.palette { display: flex; flex-wrap: wrap; gap: 8px; align-items: stretch; margin: 8px 0; padding: 0; list-style: none; }
+.palette li { display: flex; }
+.tpl { all: unset; box-sizing: border-box; cursor: grab; display: flex; flex-direction: column; gap: 2px; padding: 6px 10px; border-radius: 8px; font-size: .85rem; touch-action: none; user-select: none; border: 1px solid var(--line); border-left: 4px solid hsl(var(--h) 60% 45%); background: color-mix(in srgb, hsl(var(--h) 65% 50%) 22%, var(--surface)); color: var(--ink); }
+.tpl small { color: var(--ink-2); }
+.tpl.armed { outline: 2px solid var(--accent); }
+.tpl:focus-visible { outline: 2px solid var(--accent); }
+.twocol { display: grid; grid-template-columns: 220px 1fr; gap: 16px; align-items: start; }
+@media (max-width: 760px) { .twocol { grid-template-columns: 1fr; } }
+.palette li { position: relative; } .tpl-edit { all: unset; position: absolute; top: 4px; right: 6px; cursor: pointer; font-size: .8rem; color: var(--ink-3); } .tpl-edit:focus-visible { outline: 2px solid var(--accent); }
+.tpl { padding-right: 24px; min-width: 150px; max-width: 240px; } .tpl small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.editor input[type=number], .editor input[aria-label^=Template] { font: inherit; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); }
+
+/* The week is a FullCalendar time grid; these make it follow the page's colours and the 30 px an hour the page assumes. */
+.weekgrid { margin: 12px 0; --fc-border-color: var(--line); --fc-page-bg-color: var(--surface); --fc-neutral-bg-color: var(--grid); --fc-event-text-color: var(--ink); font-size: .8rem; color: var(--ink); }
+.weekgrid .fc-timegrid-slot { height: 30px; }
+.weekgrid .fc-col-header-cell-cushion, .weekgrid .fc-timegrid-slot-label-cushion { color: var(--ink-2); text-decoration: none; }
+.weekgrid .fc-event.slotev { color: var(--ink); border-left-width: 4px; cursor: grab; }
+.weekgrid .fc-event.slotev.picked { outline: 2px solid var(--accent); z-index: 5; }
+.weekgrid .fc-event.carry { opacity: .55; border-style: dashed; cursor: default; }
+.weekgrid .evbody { display: flex; flex-direction: column; gap: 1px; padding: 2px 4px; line-height: 1.2; overflow: hidden; }
+.weekgrid .evbody .when { color: var(--ink-2); } .weekgrid .evbody .chip { font-size: .68rem; align-self: flex-start; } .weekgrid .evbody .note { position: absolute; top: 2px; right: 6px; color: var(--warn); font-weight: 700; }
+.weekgrid .fc-bg-event.gapev { opacity: 1; } .weekgrid .gaplabel { display: block; font-size: .7rem; color: var(--ink-3); padding: 2px 6px; font-style: italic; }
+.weekgrid.armed .fc-timegrid-col { cursor: copy; }
+.weekgrid .fc-timegrid-col-frame { min-height: 0; }
+
+/* The calendar: committed, staged and planned slots look different in more than colour (border style and a word). */
+.calnav { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 8px 0; }
+.place-committed { background: color-mix(in srgb, var(--ink-3) 22%, var(--surface)); border: 1px solid var(--ink-3); }
+.place-staged { background: color-mix(in srgb, var(--accent) 22%, var(--surface)); border: 2px solid var(--accent); }
+.place-planned { background: var(--surface); border: 1.5px dashed var(--accent); }
+.swatch.place-committed, .swatch.place-staged, .swatch.place-planned { width: 16px; height: 12px; }
+.badge.place-committed, .badge.place-staged, .badge.place-planned { font-size: .72rem; padding: 1px 8px; border-radius: 999px; margin-left: 6px; }
+.badge.hand { font-size: .72rem; padding: 1px 8px; border-radius: 999px; margin-left: 6px; color: var(--warn); background: var(--warn-bg); }
+.caldetail { margin: 12px 0; }
+.groups { display: flex; gap: 2px; font-size: .7rem; color: var(--ink-2); margin-bottom: 2px; }
+.groups span { text-align: center; border-bottom: 2px solid var(--line); overflow: hidden; white-space: nowrap; min-width: 2px; }
+.compare h4, .compare h5 { margin: 8px 0 2px; }
+.cmp { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; } .cmp ul { margin: 4px 0; padding-left: 18px; }
+.caldetail table { width: 100%; } .caldetail td, .caldetail th { text-align: left; padding: 3px 8px; vertical-align: top; }
+@media (max-width: 700px) { .cmp { grid-template-columns: 1fr; } }
+.breaks { list-style: none; display: flex; gap: 6px 16px; flex-wrap: wrap; padding: 0; margin: 6px 0; font-size: .85rem; color: var(--ink-2); }
+.blockpick ul { list-style: none; display: flex; gap: 6px; flex-wrap: wrap; padding: 0; margin: 4px 0 10px; max-height: 120px; overflow-y: auto; } .blockpick button { padding: 3px 10px; font-size: .82rem; } .blockpick button[aria-pressed="true"] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, var(--surface)); }
+
+/* The continuous timeline: every slot of the week one after another, what plays by name. */
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.calside { height: min(58vh, 560px); overflow-y: auto; position: relative; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); margin-top: 8px; }
+.timeline { padding: 0 10px 40px; }
+.tlday { position: sticky; top: 0; z-index: 3; margin: 0; padding: 8px 2px 4px; font-size: .85rem; background: var(--surface); border-bottom: 1px solid var(--line); }
+.tlslot { content-visibility: auto; contain-intrinsic-size: auto 300px; margin: 8px 0 14px; padding-left: 8px; }
+.tlslot.place-committed { border-left: 4px solid var(--ink-3); background: none; border-top: 0; border-right: 0; border-bottom: 0; }
+.tlslot.place-staged { border-left: 4px solid var(--accent); background: none; border-top: 0; border-right: 0; border-bottom: 0; }
+.tlslot.place-planned { border-left: 4px dashed var(--accent); background: none; border-top: 0; border-right: 0; border-bottom: 0; }
+.tlslot.current { background: color-mix(in srgb, var(--accent) 7%, var(--surface)); }
+.tlhead { all: unset; cursor: pointer; display: block; width: 100%; font-size: .88rem; padding: 4px 2px; } .tlhead:focus-visible { outline: 2px solid var(--accent); }
+.tltotals { margin: 0 0 4px; }
+.tltable { width: 100%; border-collapse: collapse; font-size: .8rem; }
+.tltable td { padding: 1px 6px; vertical-align: top; }
+.tltime { color: var(--ink-3); white-space: nowrap; font-variant-numeric: tabular-nums; } .tllen { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; } .tlkind { color: var(--ink-3); white-space: nowrap; }
+.tlrow.content td:first-child { border-left: 3px solid var(--series); } .tlrow.content .tlwhat { font-weight: 600; }
+.tlrow.ad td:first-child { border-left: 3px solid color-mix(in srgb, var(--warn) 70%, var(--surface)); }
+.tlrow.bumper td:first-child { border-left: 3px solid color-mix(in srgb, var(--ok) 70%, var(--surface)); }
+.tlrow.interstitial td:first-child { border-left: 3px dotted var(--ink-3); } .tlrow.dead-air td:first-child { border-left: 3px solid var(--ink-3); } .tlrow.dead-air { color: var(--ink-3); }
+.tlkind { color: var(--ink-3); font-size: .74rem; } .tlrow .tlkind { white-space: normal; }
+.calhelp { margin: 0 0 4px; } .calhelp summary { cursor: pointer; } .calhelp p { margin: 4px 0; }
+.calpage .page-head { margin: 0; } .calpage .page-head h1 { margin: 0 0 4px; font-size: 1.3rem; } .calnav { margin: 4px 0; } .calpage .legend { margin: 2px 0; }
+  .tlwarn { margin: 0 0 4px; } .tlwarn summary { cursor: pointer; color: var(--warn); } .tlwarn .warn-note { margin: 2px 0; }
+
+/* A break is one quiet line under the programs, which stay prominent. */
+.tlrow.content td { padding-top: 6px; padding-bottom: 2px; font-size: .86rem; }
+.tlbreak td { padding-top: 1px; padding-bottom: 1px; font-size: .76rem; color: var(--ink-2); }
+.tlbreak .tlwhat { max-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tlbtn { all: unset; cursor: pointer; color: var(--warn); } .tlbtn:focus-visible { outline: 2px solid var(--accent); }
+.tlnames { margin-left: 8px; }
+.tlclip td { font-size: .74rem; color: var(--ink-2); } .tlclip .tlwhat { padding-left: 22px; }
+
+/* The days as a time grid: slots on the clock, with their blocks inside. */
+.calgrid { --fc-border-color: var(--line); --fc-page-bg-color: var(--surface); --fc-neutral-bg-color: var(--grid); --fc-event-bg-color: transparent; --fc-event-border-color: transparent; --fc-event-text-color: var(--ink); font-size: .8rem; color: var(--ink); }
+.calgrid .fc-timegrid-slot { height: 48px; }
+.calgrid .fc-col-header-cell-cushion, .calgrid .fc-timegrid-slot-label-cushion { color: var(--ink-2); text-decoration: none; }
+.calgrid .fc-event.calev { background: none; border: 0; box-shadow: none; padding: 1px; cursor: grab; }
+.calgrid .fc-event.calev.place-committed { cursor: default; }
+.calgrid .cslot.cont { opacity: .6; border-style: dashed; }
+.calgrid .cslot.locked .chead strong::after { content: ' 🔒'; }
+.calgrid .cblocks { flex-direction: column; }
+.calgrid .cblk { flex-direction: row; align-items: center; gap: 6px; padding: 1px 4px; min-height: 0; }
+.calgrid .cname { -webkit-line-clamp: 1; min-height: 0; flex: 0 1 auto; }
+.calgrid .cbar { height: 10px; flex: 1 1 40px; }
+.calgrid .fc-event-resizer { z-index: 3; }
+.calday-wrap { margin: 6px 0; }
+.cslot { height: 100%; box-sizing: border-box; border-radius: 8px; padding: 4px 4px 6px; display: flex; flex-direction: column; gap: 4px; overflow: visible; cursor: pointer;
+  background: color-mix(in srgb, hsl(var(--h) 60% 52%) 14%, var(--surface)); }
+.cslot.place-committed { border: 1px solid var(--ink-3); background: color-mix(in srgb, hsl(var(--h) 40% 50%) 16%, var(--surface)); }
+.cslot.place-staged { border: 2px solid hsl(var(--h) 60% 45%); }
+.cslot.place-planned { border: 1.5px dashed hsl(var(--h) 60% 45%); }
+.cslot.picked { outline: 3px solid var(--accent); outline-offset: 1px; z-index: 2; }
+.chead { display: flex; align-items: center; gap: 2px 4px; min-height: 22px; overflow: hidden; white-space: nowrap; font-size: .82rem; }
+.chead .badge { font-size: .68rem; padding: 0 6px; margin-left: 0; }
+.cblocks { display: flex; gap: 2px; flex: 1; min-width: 0; min-height: 0; }
+.cblk { all: unset; box-sizing: border-box; cursor: pointer; flex: 1 1 0; min-width: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 5px; padding: 2px 3px; display: flex; flex-direction: column; gap: 2px; overflow: hidden; font-size: .72rem; }
+.cblk:focus-visible { outline: 2px solid var(--accent); }
+.cblk[aria-pressed="true"] { outline: 3px solid var(--accent); outline-offset: -1px; }
+.cblk.hasdead { border: 2px solid #c81e3a; }
+.cblk.pinned .cname { text-decoration: underline dotted; }
+.cname { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-weight: 600; line-height: 1.2; overflow-wrap: anywhere; min-height: 2.4em; }
+.cbar { display: flex; height: 30px; border-radius: 3px; overflow: hidden; flex: none; }
+.ctime { color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.seg { display: inline-block; height: 100%; min-width: 1px; border-right: 1px solid var(--surface); }
+.seg.content { background: hsl(var(--h, 215) 55% 50%); }
+.legend .seg.content { background: var(--series); }
+.seg.ad { background: #e9a21b; } .seg.bumper { background: #8a5cd6; } .seg.interstitial { background: #c026a3; min-width: 3px; }
+.seg.dead-air { min-width: 8px; background: repeating-linear-gradient(135deg, #c81e3a 0 3px, transparent 3px 6px); box-shadow: inset 0 0 0 1px #c81e3a; }
+.legend .seg { width: 14px; height: 14px; border-radius: 3px; vertical-align: -2px; margin-right: 6px; border: 0; }
+@media (prefers-contrast: more) { .seg.dead-air { background: #c81e3a; } }
+
+/* The bar for the picked slot and block. */
+.editbar, .editbar-hint { margin: 8px 0; } .editbar p { margin: 4px 0; }
+.editbar .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 6px 0; } .editbar .group { display: inline-flex; gap: 2px; }
+.blockpanel { border-top: 1px solid var(--line); margin-top: 6px; padding-top: 4px; } .blockpanel h3 { margin: 4px 0; font-size: .95rem; }
+
+/* Blocks inside a slot in the list: a heading for each, so picking a block brings the list to it. */
+.tlblockhead td { padding-top: 8px; border-top: 1px solid var(--line); background: var(--surface); position: sticky; top: 30px; z-index: 1; }
+.tlblock.current .tlblockhead td { background: color-mix(in srgb, var(--accent) 14%, var(--surface)); }
+.tlblock.current { box-shadow: inset 4px 0 0 var(--accent); }
+.tlblockhead .tlbtn { color: var(--ink); }
+
+.rules { display: flex; flex-direction: column; gap: 10px; width: 100%; }
+.rulelist h4 { margin: 4px 0; font-size: .9rem; }
+.rule { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-start; border: 1px solid var(--line); border-radius: 8px; padding: 8px; margin-bottom: 6px; }
+.rulefields { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 6px 10px; flex: 1; }
+.rulefields label { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; font-size: .85rem; }
+.rulefields input, .rulefields select { width: 100%; box-sizing: border-box; }
+.showrule { flex-direction: column; width: 100%; box-sizing: border-box; }
+
+.rulefields label { position: relative; }
+.suggest { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
+.suggest button { font-size: .8rem; padding: 1px 6px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel, transparent); cursor: pointer; }
+.addchannel fieldset { border: 1px solid var(--line); border-radius: 8px; margin: 0 0 12px; display: flex; flex-direction: column; gap: 8px; max-width: 520px; }
+.addchannel label { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+a.button { display: inline-block; padding: 4px 10px; border: 1px solid var(--line); border-radius: 6px; text-decoration: none; }

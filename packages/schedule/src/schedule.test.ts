@@ -100,7 +100,7 @@ describe('mistakes are reported clearly', () => {
     const file = parseScheduleFile(EXAMPLE);
     await expect(resolveSchedule({ ...file, interstitial: { list: 'Nope' } }, fakeSource())).rejects.toThrow(/no filler list named "Nope"/);
     await expect(resolveSchedule({ ...file, pools: { ...file.pools, 'office-hours': { shows: ['Ghost Show'] } } }, fakeSource())).rejects.toThrow(/no show named "Ghost Show"/);
-    await expect(resolveSchedule({ ...file, pools: { ...file.pools, 'kids-movies': { movies: { genre: 'Western' } } } }, fakeSource())).rejects.toThrow(ResolveError);
+    await expect(resolveSchedule({ ...file, pools: { ...file.pools, 'kids-movies': { movies: { genre: ['Western'] } } } }, fakeSource())).rejects.toThrow(ResolveError);
     const badEx = { ...file, exceptions: [{ ...file.exceptions[0]!, play: { show: 'Doctor Who', title: 'Nope' } }] };
     await expect(resolveSchedule(badEx, fakeSource())).rejects.toThrow(/no episode titled "Nope"/);
   });
@@ -206,5 +206,21 @@ describe('exporting a channel file with ids', () => {
   it('says when a title is not in the library, and refuses a file that does not parse', async () => {
     await expect(addIds(EXAMPLE.replace('Parks and Recreation', 'Ghost Show'), fakeSource())).rejects.toThrow(/no show titled "Ghost Show"/);
     await expect(addIds('nonsense: true', fakeSource())).rejects.toThrow(/problems/);
+  });
+});
+
+describe('slots with a length and a fill pool', () => {
+  it('each gap becomes a start-only slot of the fill pool, all sharing one place in it', async () => {
+    const text = EXAMPLE.replace('{ at: "13:00", pool: comedy-movies-up-to-117 }', '{ at: "13:00", length: 2h, pool: comedy-movies-up-to-117 }').replace(/^week:/m, 'fill: office-hours\nweek:');
+    const r = await resolveSchedule(parseScheduleFile(text), fakeSource());
+    expect(r.schedule.week.map((s) => [s.day, s.at, s.pool, s.link?.name])).toEqual([
+      [0, 0, 'office-hours', undefined], [0, 46_800_000, 'comedy-movies-up-to-117', undefined], [0, 54_000_000, 'office-hours', '~fill'],
+    ]);
+  });
+  it('a gap with no fill pool, or two slots over each other, is a file error', () => {
+    const short = EXAMPLE.replace('{ at: "13:00", pool: comedy-movies-up-to-117 }', '{ at: "13:00", length: 2h, pool: comedy-movies-up-to-117 }');
+    expect(() => parseScheduleFile(short)).toThrow(/fill/);
+    const over = EXAMPLE.replace('{ at: "00:00", pool: office-hours }', '{ at: "00:00", length: 14h, pool: office-hours }');
+    expect(() => parseScheduleFile(over)).toThrow(/next slot starts/);
   });
 });

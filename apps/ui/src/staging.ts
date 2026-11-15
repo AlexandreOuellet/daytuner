@@ -67,3 +67,23 @@ export function timeOf(zone: string, ms: number): string {
   const p = parts(zone, ms);
   return `${String(p.h).padStart(2, '0')}:${String(p.min).padStart(2, '0')}`;
 }
+
+/** What `zone`'s wall clock is ahead of UTC at an instant, in milliseconds (a whole number of seconds). */
+const offsetAt = (zone: string, ms: number): number => {
+  const p = new Intl.DateTimeFormat('en-CA', { timeZone: zone, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }).formatToParts(new Date(ms));
+  const g = (t: string): number => Number(p.find((x) => x.type === t)?.value);
+  return Date.UTC(g('year'), g('month') - 1, g('day'), g('hour'), g('minute'), g('second')) - Math.floor(ms / 1000) * 1000;
+};
+
+/**
+ * An instant as its wall clock in `zone`, written as if the wall clock were UTC. A grid that only knows UTC then draws the
+ * channel's own hours (20:00 in Toronto sits on the 20:00 line). Across a daylight saving change the two differ by an hour.
+ */
+export const wallOf = (zone: string, ms: number): number => ms + offsetAt(zone, ms);
+
+/** The instant whose wall clock in `zone` reads `wall` (the inverse of `wallOf`). */
+export function msOf(zone: string, wall: number): number {
+  let t = wall;
+  for (let i = 0; i < 3; i++) t = wall - offsetAt(zone, t);
+  return t;
+}

@@ -101,9 +101,17 @@ Terms are defined in [`glossary.md`](glossary.md).
   rotation. Within a show the order is by season, then episode.
 - Shuffled pools are **fit-aware**: if the next pick does not fit the time left in the window,
   take a later one that does.
+  When nothing left in the round fits and a program already drawn is shown again, the plan says so
+  (an `info` warning, `repeat-pick`), because a short program can come back sooner than the pool's size suggests.
 - Ordered shows never skip, as in Tunarr. Each slot has its own episode cursor. When the next
   episode does not fit, the block is made longer (see Windows), or the window ends with unused
   time. Skip and defer is not part of 1.0.
+- An ordered show's place is kept as a number **and as the last episode taken**. Episodes arrive and go, so each plan finds
+  the place again as the episode after the last one taken, in the list as it is now. With episodes 1 and 3 to 10 in
+  the library and 1 aired, an arriving 2 plays before 3. If 3 was already taken (committed), the next is 4 and the plan
+  says the place moved (`place-moved`, info): an episode that arrived behind the place is skipped, and a rewind plays it,
+  as in Tunarr, so a committed lineup is never rewritten. If the last episode is gone from the list the number is kept and
+  the plan warns (`place-lost`). A store from before this has no last episode and uses the number until the next commit.
 - A cursor advances only when an episode produced by the sequence has aired, not when it is planned
   or staged. An episode that is taken out of a staged slot plays next time.
 - An **explicit pick** (a specific program chosen for an exception, such as a Halloween special of

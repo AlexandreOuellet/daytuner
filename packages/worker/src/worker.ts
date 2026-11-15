@@ -3,7 +3,7 @@
 // agree about where the lineup ends, and it records every commit so that a crash can be resolved.
 // Rules: docs/architecture.md, "Worker".
 
-import { adjustSequence, computeMetrics, diffSlots, emptyPlanState, plan, type SlotChange, type Clock, type StagedWindow, type CursorAdjustment, type LockConflict, type PlannedSlot, type PlanWarning, type Schedule } from '@daytuner/engine';
+import { adjustSequence, placeInList, computeMetrics, diffSlots, emptyPlanState, plan, type SlotChange, type Clock, type StagedWindow, type CursorAdjustment, type LockConflict, type PlannedSlot, type PlanWarning, type Schedule } from '@daytuner/engine';
 import { parseScheduleFile, resolveSchedule } from '@daytuner/schedule';
 import { cachedSource } from './chapters.js';
 import type { ChannelRecord, CommitRecord, PinRecord, StagedSlotRecord, Store } from '@daytuner/store';
@@ -11,6 +11,33 @@ import { alignToGrid, appendVerified, toLineupItems, totalDuration, type LineupI
 
 /** Two ends closer than this are the same: Tunarr's durations carry fractions that are rounded. */
 const EDGE_TOLERANCE_MS = 1;
+/** The most the end of a lineup may have drifted from what was written, when it has not left its grid line. */
+const EDGE_DRIFT_TOLERANCE_MS = 1000;
+
+/**
+ * What changed in the pools since the channel was last planned: programs that joined and left, so a rule that starts to match
+ * (or stops matching) something is seen. The first plan has nothing to compare with and says nothing.
+ */
+export function poolChanges(before: Record<string, string[]> | undefined, schedule: Schedule, titles: Record<string, string>, at: number): PlanWarning[] {
+  if (!before) return [];
+  const out: PlanWarning[] = [];
+  const names = (ids: string[]): string => `${ids.slice(0, 3).map((i) => titles[i] ?? i).join('; ')}${ids.length > 3 ? ` and ${ids.length - 3} more` : ''}`;
+  for (const [name, pool] of Object.entries(schedule.pools)) {
+    const old = before[name];
+    if (!old) continue;
+    const was = new Set(old);
+    const is = new Set(pool.programs);
+    const joined = pool.programs.filter((i) => !was.has(i));
+    const left = old.filter((i) => !is.has(i));
+    if (joined.length === 0 && left.length === 0) continue;
+    const grew = old.length > 0 && pool.programs.length > old.length * 2;
+    out.push({
+      code: 'pool-changed', severity: grew ? 'warning' : 'info', at, slotId: name,
+      message: `pool ${name}: ${joined.length > 0 ? `${joined.length} joined (${names(joined)})` : ''}${joined.length > 0 && left.length > 0 ? ', ' : ''}${left.length > 0 ? `${left.length} left (${names(left)})` : ''}; it holds ${pool.programs.length} now${grew ? `, more than twice the ${old.length} before: check the rule` : ''}`,
+    });
+  }
+  return out;
+}
 
 /** The store and Tunarr disagree, or Tunarr is in a state the worker will not write to. Nothing was written. */
 export class ConsistencyError extends Error {
@@ -28,6 +55,35 @@ export interface WorkerDeps {
 }
 
 export type Recovery = 'completed' | 'dropped';
+
+const sumMs = (items: readonly { duration: number }[]): number => items.reduce((a, i) => a + i.duration, 0);
+
+/**
+ * What is wrong with the planned slots as they would be written, or an empty list. Checked before anything is sent, and the
+ * rules are the grid rules of `planning-rules.md`: the first slot starts where the lineup is aligned to, slots touch, each starts
+ * and ends on the grid, what is in each adds up to its length exactly (whole milliseconds), and every block boundary inside a slot
+ * is on the grid (the first block of a slot may start after a head and the last may end where a tail starts).
+ */
+export function layoutProblems(slots: readonly PlannedSlot[], from: number, grid: number): string[] {
+  const out: string[] = [];
+  const say = (m: string): void => { if (out.length < 8) out.push(m); };
+  const on = (t: number): boolean => t % grid === 0;
+  let at = from;
+  slots.forEach((s, i) => {
+    const name = `slot ${s.slotId} at ${s.start}`;
+    if (s.start !== at) say(i === 0 ? `the first slot starts at ${s.start}, not where the lineup is aligned to (${from})` : `${name} does not start where the slot before it ends (${at})`);
+    if (!on(s.start) || !on(s.end)) say(`${name} (to ${s.end}) is not on the ${grid / 60_000}-minute grid`);
+    const items = sumMs(s.items);
+    if (items !== s.end - s.start) say(`${name}: its items last ${items} ms but the slot lasts ${s.end - s.start} ms`);
+    if (s.items.some((x) => !Number.isInteger(x.duration))) say(`${name} has an item whose length is not a whole number of milliseconds`);
+    s.blocks.forEach((b, j) => {
+      if (j > 0 && !on(b.start)) say(`${name}: block ${j + 1} starts at ${b.start}, off the grid`);
+      if (j < s.blocks.length - 1 && !on(b.end)) say(`${name}: block ${j + 1} ends at ${b.end}, off the grid`);
+    });
+    at = s.end;
+  });
+  return out;
+}
 
 export interface TopUpOptions {
   /** Plan and report, but write nothing: not to Tunarr and not to the store. */
@@ -74,7 +130,7 @@ function resolvePending(store: Store, pending: CommitRecord, edgeNow: number, at
  * What staging adds to a plan: the locked slots as stored, and the pins of the others. A pinned program that no
  * pool uses is added to the library with the length it had when it was pinned.
  */
-function stagedInputs(
+export function stagedInputs(
   store: Store,
   ch: ChannelRecord,
   edge: number,
@@ -84,14 +140,16 @@ function stagedInputs(
   const staged = store.stagedSlots(ch.id, edge);
   const pins: { start: number; blocks: Record<number, string> }[] = [];
   for (const s of staged) {
-    if (s.locked || Object.keys(s.pins).length === 0) continue;
+    if (Object.keys(s.pins).length === 0) continue;
     const blocks: Record<number, string> = {};
     for (const [n, pin] of Object.entries(s.pins)) {
       blocks[Number(n)] = pin.id;
+      // A pinned program that no pool holds is still a program of the library: a locked slot keeps it too, and would otherwise
+      // be dropped at commit as "no longer in the library".
       library.programs[pin.id] ??= { duration: pin.duration };
       titles[pin.id] ??= pin.title;
     }
-    pins.push({ start: s.start, blocks });
+    if (!s.locked) pins.push({ start: s.start, blocks });
   }
   const windows = staged.filter((s) => s.edited && s.slotId).map((s) => ({ start: s.start, end: s.end, slotId: s.slotId! }));
   return { locked: staged.filter((s) => s.locked).map((s) => s.planned), pins, windows };
@@ -115,13 +173,22 @@ export async function topUp(deps: WorkerDeps, channelName: string, opts: TopUpOp
     ch = store.channel(channelName)!;
   }
 
-  if (!same(edgeNow, ch.edge)) {
+  // Tunarr reads its filler clips back with their real lengths (fractions of a millisecond), so a long lineup's end drifts a little
+  // from the whole milliseconds that were written. A drift of under a second that leaves the next grid line where it was is only that:
+  // the new lineup starts on the grid line after a flex, as it does for any fractional end. Anything else is an outside change.
+  const gridMs = parseScheduleFile(ch.schedule).grid;
+  const drift = edgeNow - ch.edge;
+  const onlyDrift = !same(edgeNow, ch.edge) && Math.abs(drift) <= EDGE_DRIFT_TOLERANCE_MS && alignToGrid(edgeNow, gridMs).from === alignToGrid(ch.edge, gridMs).from;
+  if (!same(edgeNow, ch.edge) && !onlyDrift) {
     throw new ConsistencyError(
       `Tunarr's lineup for "${channelName}" ends at ${edgeNow} but the store recorded ${ch.edge}. Someone changed the channel outside DayTuner, or its database was restored. Nothing was written.`,
     );
   }
   const now = clock.now();
-  if (edgeNow < now) {
+  // A channel nothing was ever written to has only its start time. When that is in the past, a flex bridges the gap to the grid line
+  // just before now, and the first plan starts there (nothing before now can air, and the start time is never changed).
+  const empty = tun.duration === 0;
+  if (edgeNow < now && !empty) {
     throw new ConsistencyError(
       `the lineup for "${channelName}" has already run out (it ended ${Math.round((now - edgeNow) / 60_000)} minutes ago). Appending now would shift Tunarr's whole timeline, so nothing was written.`,
     );
@@ -132,13 +199,19 @@ export async function topUp(deps: WorkerDeps, channelName: string, opts: TopUpOp
   if (ahead >= ch.floorMs + ch.stepMs) return { action: 'none', ...base };
 
   const { schedule, library, fillerListIds, titles } = await resolveSchedule(parseScheduleFile(ch.schedule), cachedSource(client, store, clock));
-  const { from, flex } = alignToGrid(edgeNow, schedule.grid);
+  const aligned = alignToGrid(edgeNow, schedule.grid);
+  const nowLine = Math.floor(now / schedule.grid) * schedule.grid;
+  const { from, flex } = empty && aligned.from < nowLine ? { from: nowLine, flex: Math.round(nowLine - edgeNow) } : aligned;
   const { locked, pins, windows } = stagedInputs(store, ch, edgeNow, library, titles);
   const result = plan({ schedule, library, state: ch.state, from, to: now + ch.floorMs + ch.stepMs, locked, pins, windows });
+  result.warnings.push(...poolChanges(store.poolsSeen(ch.id), schedule, titles, from));
+  if (onlyDrift) result.warnings.push({ code: 'edge-drift', severity: 'info', at: from, slotId: '', message: `Tunarr's lineup ends ${Math.abs(Math.round(drift))} ms ${drift < 0 ? 'before' : 'after'} where it was written to end (it stores the filler clips with their real lengths); a flex of ${Math.round(from - edgeNow)} ms brings the next slot back to the grid` });
   if (result.slots.length === 0) return { action: 'none', ...base, warnings: result.warnings };
 
   const items: LineupItem[] = [...(flex > 0 ? [{ type: 'flex' as const, duration: flex }] : []), ...toLineupItems(result.slots, fillerListIds)];
   const totalMs = totalDuration(items);
+  const bad = layoutProblems(result.slots, from, schedule.grid);
+  if (bad.length > 0) throw new ConsistencyError(`the plan does not lie on the grid as it should, so nothing was written: ${bad.join('; ')}`);
   if (opts.dryRun) {
     return { action: 'would-append', ...base, warnings: result.warnings, conflicts: result.conflicts, items: items.length, totalMs, slots: result.slots.length, planned: result.slots };
   }
@@ -173,6 +246,14 @@ export async function topUp(deps: WorkerDeps, channelName: string, opts: TopUpOp
     store.noteCommit(commit.id, `verification failed: ${what}`);
     throw new ConsistencyError(`Tunarr stored something different from what was sent (${what}). The commit stays pending; see \`channel commits ${channelName}\` and \`channel resync ${channelName}\`.`);
   }
+  // Tunarr's lineup must now end exactly where the plan does: that is where every position in it is checked from.
+  const planEnd = result.slots[result.slots.length - 1]!.end;
+  if (Math.abs(report.edgeAfter - planEnd) > EDGE_TOLERANCE_MS) {
+    const what = `the lineup now ends at ${report.edgeAfter}, but the plan ends at ${planEnd}`;
+    store.noteCommit(commit.id, `verification failed: ${what}`);
+    throw new ConsistencyError(`Tunarr stored the items, but not where they were planned (${what}). The commit stays pending; see \`channel commits ${channelName}\` and \`channel resync ${channelName}\`.`);
+  }
+  store.setPoolsSeen(ch.id, Object.fromEntries(Object.entries(schedule.pools).map(([n, p]) => [n, [...p.programs]])), clock.now());
   store.completeCommit(commit.id, report.edgeAfter, clock.now(), {
     metrics: computeMetrics(result.slots, { grid: schedule.grid, zone: schedule.zone }),
     alerts: result.warnings.filter((w) => w.severity === 'alert').length,
@@ -535,6 +616,69 @@ export interface AddedChannel {
   titles: Record<string, string>;
 }
 
+export interface ChannelFileOptions {
+  name: string;
+  /** The server's time zone. */
+  timezone: string;
+  /** Names of lists Tunarr has: the one the ad breaks draw from, and the one that fills gaps. */
+  adList?: string | undefined;
+  fillerList?: string | undefined;
+  /** The planning grid in minutes, one of `GRID_CHOICES`. Defaults to 15. */
+  gridMinutes?: number | undefined;
+}
+
+/** The grids a new channel may have, in minutes. */
+export const GRID_CHOICES = [5, 10, 15, 20, 30, 60] as const;
+const gridOf = (minutes: number | undefined): number => {
+  const m = minutes ?? 15;
+  if (!(GRID_CHOICES as readonly number[]).includes(m)) throw new ConsistencyError(`the grid must be one of ${GRID_CHOICES.join(', ')} minutes`);
+  return m * 60_000;
+};
+
+/** The text of a channel file with no slots and no pools yet: the week is designed on the schedule page. Grid 15 minutes unless given. */
+export function newChannelFile(o: ChannelFileOptions): string {
+  const q = (t: string): string => JSON.stringify(t);
+  const ads = o.adList
+    ? [`  mid:  { list: ${q(o.adList)}, every: 8m, length: 2m-3m, tailBuffer: 1m }`, `  post: { list: ${q(o.adList)}, length: 0-5m }`, `  tail: { list: ${q(o.adList)}, length: 0-25m }`]
+    : [];
+  return [
+    `channel: ${q(o.name)}`, `timezone: ${q(o.timezone)}`, `grid: ${gridOf(o.gridMinutes) / 60_000}m`,
+    'ads:', '  step: 15s', '  ratio: { min: 15%, max: 60% }', ...ads,
+    ...(o.fillerList ? [`interstitial: { list: ${q(o.fillerList)} }`] : []),
+    'pools: {}', 'week: {}', '',
+  ].join('\n');
+}
+
+export interface CreateChannelOptions extends ChannelFileOptions {
+  number: number;
+  hidden: boolean;
+  floorMs: number;
+  stepMs: number;
+  seed: number;
+}
+
+
+/**
+ * Creates an empty channel in Tunarr (needs a client that may write) and adds it to the store with an empty week. Refuses a name
+ * or number that is already used. The channel starts now, rounded down to the grid, and its start time is never changed again.
+ */
+export async function createChannel(deps: WorkerDeps, o: CreateChannelOptions): Promise<AddedChannel> {
+  const { store, client, clock } = deps;
+  const name = o.name.trim();
+  if (name === '') throw new ConsistencyError('give the channel a name');
+  if (!Number.isInteger(o.number) || o.number < 1) throw new ConsistencyError('the channel number must be a whole number from 1');
+  if (store.channel(name)) throw new ConsistencyError(`DayTuner already manages a channel named "${name}"`);
+  const existing = await client.channels();
+  const clash = existing.find((c) => c.number === o.number || slugOf(c.name) === slugOf(name));
+  if (clash) throw new ConsistencyError(`Tunarr already has a channel ${clash.number}, "${clash.name}": choose another ${clash.number === o.number ? 'number' : 'name'}`);
+  const yaml = newChannelFile({ ...o, name });
+  const parsed = parseScheduleFile(yaml);
+  // The lists must exist before anything is created in Tunarr.
+  await resolveSchedule(parsed, cachedSource(client, store, clock));
+  const made = await client.createChannel({ name, number: o.number, startTime: Math.floor(clock.now() / gridOf(o.gridMinutes)) * gridOf(o.gridMinutes), stealth: o.hidden });
+  return addChannel(deps, { yaml, tunarrChannel: made.id, floorMs: o.floorMs, stepMs: o.stepMs, seed: o.seed });
+}
+
 const slugOf = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 
 /**
@@ -644,7 +788,7 @@ export async function adoptHistory(
   const found = placesFromLineup(schedule, await client.lineup(ch.tunarrId));
   if (!opts.dryRun) {
     const sequences = { ...ch.state.sequences };
-    for (const f of found) if (f.lastProgramId !== undefined) sequences[f.key] = f.place;
+    for (const f of found) if (f.lastProgramId !== undefined) sequences[f.key] = { ...f.place, last: f.lastProgramId };
     store.setState(channelName, { ...ch.state, sequences });
   }
   return { found, titles };
@@ -696,8 +840,8 @@ export async function cursorPreview(
   const { schedule, library, titles } = await resolveSchedule(parseScheduleFile(ch.schedule), cachedSource(client, store, clock));
   const info = listSequences(schedule).find((x) => x.key === sequenceKey);
   if (!info) throw new ConsistencyError(`no ordered pool is called "${sequenceKey}" (known: ${listSequences(schedule).map((x) => x.key).join(', ') || 'none'})`);
-  const before = ch.state.sequences[sequenceKey] ?? { position: 0, history: 0 };
-  const after = adjustSequence(before, adjustment, info.length);
+  const before = placeInList(ch.state.sequences[sequenceKey] ?? { position: 0, history: 0 }, schedule.pools[info.pool]!.programs).seq;
+  const after = adjustSequence(before, adjustment, info.length, schedule.pools[info.pool]!.programs);
   const { from } = alignToGrid(ch.edge, schedule.grid);
   const to = from + (opts.days ?? 14) * 86_400_000;
   const { locked, pins, windows } = stagedInputs(store, ch, from, library, titles);
@@ -735,8 +879,8 @@ export async function adjustCursor(
   if (!info) {
     throw new ConsistencyError(`no ordered pool is called "${sequenceKey}" (known: ${listSequences(schedule).map((s) => s.key).join(', ') || 'none'})`);
   }
-  const before = ch.state.sequences[sequenceKey] ?? { position: 0, history: 0 };
-  const after = adjustSequence(before, adjustment, info.length);
+  const before = placeInList(ch.state.sequences[sequenceKey] ?? { position: 0, history: 0 }, schedule.pools[info.pool]!.programs).seq;
+  const after = adjustSequence(before, adjustment, info.length, schedule.pools[info.pool]!.programs);
   deps.store.applyAdjustment(channelName, {
     at: deps.clock.now(),
     sequenceKey,

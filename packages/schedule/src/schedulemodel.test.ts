@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { parseScheduleFile } from './file.js';
+import { gapsOf } from './weekplan.js';
 import { applyScheduleModel, exceptionOccurrences, formatTimeOfDay, scheduleModelOf } from './schedulemodel.js';
 
 const EXAMPLE = readFileSync(new URL('../../../schedules/example.yaml', import.meta.url), 'utf8');
@@ -25,7 +26,8 @@ describe('the week and pools of a channel file', () => {
     const m = model();
     const first = m.week[0]!;
     const next = {
-      week: [...m.week.slice(1), { ...first, at: first.at + 15 * 60_000 }, { day: 6, at: 21 * 3_600_000, pool: 'late-shows' }],
+      week: [...m.week.slice(1).map((x) => ({ ...x, length: 2 * 3_600_000 })), { ...first, at: first.at + 15 * 60_000, length: first.length - 15 * 60_000 }, { day: 6, at: 21 * 3_600_000, length: 900_000, pool: 'late-shows' }],
+      fill: first.pool,
       pools: { ...m.pools, 'late-shows': { shows: [{ show: 'Doctor Who', id: 'abc' }], order: 'sequential' as const } },
     };
     const text = applyScheduleModel(EXAMPLE, next);
@@ -40,12 +42,14 @@ describe('the week and pools of a channel file', () => {
 
   it('remove a slot, a whole day, and a pool nobody uses any more', () => {
     const m = model();
-    const week = m.week.filter((s) => s.day !== 3);
+    const week = m.week.filter((s) => s.at !== 13 * 3_600_000); // the Sunday 13:00 slot, so Sunday 00:00 now lasts 13 hours and the rest is a gap
     const used = new Set(week.map((s) => s.pool));
     const pools = Object.fromEntries(Object.entries(m.pools).filter(([name]) => used.has(name)));
-    const text = applyScheduleModel(EXAMPLE, { week, pools });
+    expect(() => applyScheduleModel(EXAMPLE, { week, pools })).toThrow(/fill pool/);
+    const text = applyScheduleModel(EXAMPLE, { week, pools, fill: week[0]!.pool });
     const back = scheduleModelOf(parseScheduleFile(text));
-    expect(back.week.some((s) => s.day === 3)).toBe(false);
+    expect(back.week).toHaveLength(1);
+    expect(back.fill).toBe(week[0]!.pool);
     expect(Object.keys(back.pools)).toEqual(Object.keys(pools));
   });
 
@@ -104,5 +108,44 @@ describe('special days', () => {
     expect(exceptionOccurrences({ ...base, exceptions: [{ on: { month: 2, day: 29 }, at: 0, play: { movie: 'y' } }] }, Date.UTC(2027, 0, 1), Date.UTC(2027, 11, 31))).toEqual([]);
     expect(occ[0]!.start).toBe(Date.UTC(2026, 10, 1, 0)); // 20:00 on 31 October is 00:00 UTC on 1 November (Toronto is UTC-4 until the 1st)
     expect(typeof occ[0]!.matchesSlot).toBe('boolean');
+  });
+});
+
+describe('slots with their own length and a fill pool', () => {
+  it('a file without lengths reads each slot as lasting until the next, and writes none back', () => {
+    const m = model();
+    expect(m.week.map((s) => s.length)).toEqual([13 * 3_600_000, 7 * 86_400_000 - 13 * 3_600_000]);
+    expect(applyScheduleModel(EXAMPLE, m)).toBe(EXAMPLE);
+  });
+
+  it('a shorter slot leaves a gap that the fill pool plays in, and the resolved week gets a slot for it', async () => {
+    const m = model();
+    const week = m.week.map((s) => (s.at === 13 * 3_600_000 ? { ...s, length: 2 * 3_600_000 } : s));
+    const text = applyScheduleModel(EXAMPLE, { week, pools: m.pools, fill: 'office-hours' });
+    expect(text).toContain('length: 2h');
+    const back = scheduleModelOf(parseScheduleFile(text));
+    expect(back.fill).toBe('office-hours');
+    expect(back.week.find((s) => s.at === 13 * 3_600_000)!.length).toBe(2 * 3_600_000);
+    expect(gapsOf(back.week)).toEqual([{ day: 0, at: 15 * 3_600_000, length: 7 * 86_400_000 - 15 * 3_600_000 }]);
+  });
+
+  it('overlapping slots and a gap with no fill pool are refused', () => {
+    const m = model();
+    const long = m.week.map((s) => (s.at === 0 ? { ...s, length: 14 * 3_600_000 } : s));
+    expect(() => applyScheduleModel(EXAMPLE, { week: long, pools: m.pools })).toThrow(/next slot starts/);
+    const short = m.week.map((s) => (s.at === 13 * 3_600_000 ? { ...s, length: 3_600_000 } : s));
+    expect(() => applyScheduleModel(EXAMPLE, { week: short, pools: m.pools })).toThrow(/fill pool/);
+  });
+
+  it('templates are saved with the file and a slot may name one', () => {
+    const m = model();
+    const templates = { 'Prime movie': { pool: 'comedy-movies-up-to-117', length: 9_000_000 } };
+    const week = m.week.map((s) => (s.at === 13 * 3_600_000 ? { ...s, template: 'Prime movie' } : s));
+    const text = applyScheduleModel(EXAMPLE, { week, pools: m.pools, templates });
+    expect(text).toContain('templates:');
+    const back = scheduleModelOf(parseScheduleFile(text));
+    expect(back.templates).toEqual(templates);
+    expect(back.week.find((s) => s.at === 13 * 3_600_000)!.template).toBe('Prime movie');
+    expect(() => applyScheduleModel(EXAMPLE, { week, pools: m.pools, templates: {} })).toThrow(/unknown template/);
   });
 });

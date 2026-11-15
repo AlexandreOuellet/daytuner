@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it } from 'vitest';
-import { emptyPlanState } from '@daytuner/engine';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { emptyPlanState, type Schedule } from '@daytuner/engine';
 import { Store } from '@daytuner/store';
 import { FakeTunarr, TunarrClient } from '@daytuner/tunarr-client';
 import { CHAPTER_CACHE_LIFETIME_MS } from './chapters.js';
@@ -8,7 +8,8 @@ import { adSamples } from './adsample.js';
 import { poolStats } from './poolstats.js';
 import { adSettingsOf, parseScheduleFile } from '@daytuner/schedule';
 import { isDue, runAndRecord, scheduledInstant } from './scheduler.js';
-import { cursorPreview, stageReset, adjustCursor, adoptHistory, revisionImpact, stageCheck, stageDiff, stageEdit, stageGenerate, stageRefresh, ConsistencyError, listSequences, resync, topUp, type WorkerDeps } from './worker.js';
+import { blocksFromLineup, calendarPlan, earlierEpisode, runsOf, stageRerun } from './calendar.js';
+import { cursorPreview, stageReset, adjustCursor, adoptHistory, revisionImpact, stageCheck, stageDiff, stageEdit, stageGenerate, stageRefresh, ConsistencyError, listSequences, resync, topUp, createChannel, newChannelFile, layoutProblems, poolChanges, type WorkerDeps } from './worker.js';
 
 const DAY = 86_400_000;
 const MIN = 60_000;
@@ -80,6 +81,53 @@ describe('topUp', () => {
     expect(s.store.commits(s.store.channel('Test')!.id)[0]).toMatchObject({ status: 'done', items: r.items });
   });
 
+  it('stores the lineup where the plan says, on the grid, even when the lineup it continues ends off the grid', async () => {
+    // The old lineup ends 7 minutes and 13 seconds after a grid line, as an adopted lineup may.
+    const odd = setup(3 * DAY + 7 * MIN + 13_000);
+    const grid = 15 * MIN;
+    const items0 = odd.fake.lineup.length;
+    const edgeBefore = odd.fake.data.channel.startTime + odd.fake.duration;
+    const r = await topUp(odd.deps, 'Test');
+    expect(r.action).toBe('appended');
+    const stored = odd.fake.lineup.slice(items0);
+    // A flex pad takes the lineup to the next grid line, and the plan starts there.
+    expect(stored[0]).toMatchObject({ type: 'flex' });
+    const first = r.planned![0]!;
+    expect(first.start % grid).toBe(0);
+    expect(first.start - edgeBefore).toBe(stored[0]!['duration']);
+    // Every item is where the plan put it: the stored lineup, laid end to end from the channel's start time, reaches each slot
+    // and each block boundary at exactly the planned millisecond.
+    let at = edgeBefore;
+    let i = 0;
+    const clock = (n: number): void => { for (let k = 0; k < n; k++) at += Number(stored[i++]!['duration']); };
+    clock(1); // the pad
+    for (const slot of r.planned!) {
+      expect(at).toBe(slot.start);
+      clock(slot.items.length);
+      expect(at).toBe(slot.end);
+      expect(slot.start % grid).toBe(0);
+      expect(slot.end % grid).toBe(0);
+      slot.blocks.forEach((b, j) => {
+        if (j > 0) expect(b.start % grid).toBe(0);
+        if (j < slot.blocks.length - 1) expect(b.end % grid).toBe(0);
+      });
+    }
+    expect(i).toBe(stored.length);
+    expect(odd.fake.data.channel.startTime + odd.fake.duration).toBe(r.planned![r.planned!.length - 1]!.end);
+    expect(layoutProblems(r.planned!, first.start, grid)).toEqual([]);
+  });
+
+  it('says what is wrong with a plan that is not on the grid, before writing anything', () => {
+    const slot = (start: number, end: number, extra: object = {}) => ({ slotId: 's', start, end, pool: 'p', programs: [], exception: false, blocks: [], items: [{ kind: 'flex', duration: end - start }], ...extra }) as never;
+    const g = 15 * MIN;
+    expect(layoutProblems([slot(0, g), slot(g, 3 * g)], 0, g)).toEqual([]);
+    expect(layoutProblems([slot(1000, g)], 0, g).join()).toMatch(/not where the lineup is aligned to/);
+    expect(layoutProblems([slot(0, g), slot(g + 1, 2 * g)], 0, g).join()).toMatch(/does not start where the slot before it ends/);
+    expect(layoutProblems([slot(0, g + 5_000)], 0, g).join()).toMatch(/not on the 15-minute grid/);
+    expect(layoutProblems([slot(0, g, { items: [{ kind: 'flex', duration: g - 1 }] })], 0, g).join()).toMatch(/its items last/);
+    expect(layoutProblems([slot(0, 2 * g, { blocks: [{ programId: 'a', start: 0, end: g + 3000 }, { programId: 'b', start: g + 3000, end: 2 * g }] })], 0, g).join()).toMatch(/block 1 ends at .*off the grid/);
+  });
+
   it('does nothing when the lineup already reaches far enough', async () => {
     await topUp(s.deps, 'Test');
     const before = s.fake.lineup.length;
@@ -128,6 +176,34 @@ describe('it refuses to write when it should not', () => {
     await expect(topUp(s.deps, 'Test')).rejects.toBeInstanceOf(ConsistencyError);
     await expect(topUp(s.deps, 'Test')).rejects.toThrow(/outside DayTuner/);
     expect(s.fake.lineup).toHaveLength(before);
+  });
+
+  it('carries on when the end has only drifted a little from the grid line it was written to, and says so', async () => {
+    const s = setup();
+    const edge = s.store.channel('Test')!.edge;
+    const next = Math.ceil(edge / (15 * MIN)) * (15 * MIN);
+    // The store thinks the lineup ends 139 ms after Tunarr's end (which is the grid line, less 139 ms in Tunarr's record).
+    s.store.setEdge('Test', next);
+    s.fake.appendExternally([{ type: 'flex', duration: next - 139 - edge }]);
+    const r = await topUp(s.deps, 'Test');
+    expect(r.action).toBe('appended');
+    expect(r.warnings.some((w) => w.code === 'edge-drift' && /139 ms before/.test(w.message))).toBe(true);
+    expect(s.store.commits(s.store.channel('Test')!.id)[0]!.slots[0]!.start).toBe(next);
+  });
+
+  it('still refuses a drift that moves the lineup to another grid line, or is a second or more', async () => {
+    const s = setup();
+    const edge = s.store.channel('Test')!.edge;
+    const next = Math.ceil((edge + 1) / (15 * MIN)) * (15 * MIN);
+    s.store.setEdge('Test', next);
+    s.fake.appendExternally([{ type: 'flex', duration: next + 139 - edge }]); // 139 ms after the line: the next line is a quarter hour away
+    await expect(topUp(s.deps, 'Test')).rejects.toThrow(/outside DayTuner/);
+    const t = setup();
+    const e2 = t.store.channel('Test')!.edge;
+    const n2 = Math.ceil((e2 + 1) / (15 * MIN)) * (15 * MIN);
+    t.store.setEdge('Test', n2);
+    t.fake.appendExternally([{ type: 'flex', duration: n2 - 1500 - e2 }]);
+    await expect(topUp(t.deps, 'Test')).rejects.toThrow(/outside DayTuner/);
   });
 
   it('refuses when the lineup has already run out', async () => {
@@ -294,7 +370,7 @@ describe('adopting the places of shows from an existing lineup', () => {
     expect(a.place).toEqual({ position: 5, history: 2 });
     expect(s.store.channel('Test')!.state.sequences['seq:a']).toBeUndefined();
     await adoptHistory(s.deps, 'Test');
-    expect(s.store.channel('Test')!.state.sequences['seq:a']).toEqual({ position: 5, history: 2 });
+    expect(s.store.channel('Test')!.state.sequences['seq:a']).toEqual({ position: 5, history: 2, last: 'ep5' });
   });
 
   it('leaves a show that is not in the lineup at episode 1', async () => {
@@ -430,6 +506,57 @@ describe('pins on staged slots', () => {
     expect(r.action).toBe('appended');
     expect(r.planned!.find((x) => x.start === movieSlot.start)!.programs[0]).toBe('special');
     expect(s.fake.lineup.some((i) => i['type'] === 'content' && i['id'] === 'special')).toBe(true);
+  });
+});
+
+describe('staging ahead never leaves a gap in the lineup', () => {
+  it('commits only what is due, continuing from the end of the lineup, and picks a staged slot up when its time comes', async () => {
+    const s = setup();
+    const id = s.store.channel('Test')!.id;
+    const grid = 15 * MIN;
+    const edge0 = s.store.channel('Test')!.edge;
+    // Stage one slot far ahead, with days between that are not staged, and give it a pin and a lock.
+    const far = edge0 + 20 * DAY;
+    const staged = await stageGenerate(s.deps, 'Test', { to: far + DAY, keepFrom: far, keepTo: far + DAY });
+    const slot = staged.kept.find((k) => k.pool === 'movies' && k.start >= far + MIN)!;
+    // A film no pool plays, so it can only reach the lineup through the pin.
+    s.fake.data.movies.push({ id: 'special', title: 'Pinned far ahead', duration: 100 * MIN, genres: ['Drama'] });
+    s.store.setPin('Test', slot.start, 1, { id: 'special', title: 'Pinned far ahead', duration: 100 * MIN });
+    await stageRefresh(s.deps, 'Test', slot.start); // the pin takes effect, then the lock keeps the slot as it is
+    s.store.setLocked('Test', slot.start, true);
+    expect(s.store.stagedSlots(id).every((r) => r.start >= far)).toBe(true);
+
+    const stored = (): Record<string, unknown>[] => s.fake.lineup;
+    const position = (index: number): number => { let at = s.fake.data.channel.startTime; for (let i = 0; i < index; i++) at += Number(stored()[i]!['duration']); return at; };
+    let reached = false;
+    for (let day = 0; day < 40 && !reached; day++) {
+      const before = s.fake.lineup.length;
+      const edgeBefore = s.fake.data.channel.startTime + s.fake.duration;
+      const r = await topUp(s.deps, 'Test');
+      if (r.action !== 'appended') { s.clock.t += DAY; continue; }
+      // What was added starts exactly where the lineup ended (a pad only to reach the grid), and touches: no gap, ever.
+      const first = r.planned![0]!;
+      expect(first.start - edgeBefore).toBeGreaterThanOrEqual(0);
+      expect(first.start - edgeBefore).toBeLessThan(grid);
+      expect(r.planned!.every((x, i, all) => i === 0 || all[i - 1]!.end === x.start)).toBe(true);
+      expect(layoutProblems(r.planned!, first.start, grid)).toEqual([]);
+      expect(s.fake.data.channel.startTime + s.fake.duration).toBe(r.planned![r.planned!.length - 1]!.end);
+      // The far slot is not in the lineup until a commit reaches it, and then it is exactly at its time, pinned.
+      const planned = r.planned!.find((x) => x.start === slot.start);
+      const inLineup = stored().slice(before).some((i) => i['id'] === 'special');
+      if (planned) {
+        reached = true;
+        expect(inLineup).toBe(true);
+        const index = stored().findIndex((i, n) => n >= before && i['id'] === 'special');
+        expect(position(index - slot.items.findIndex((x) => x.kind === 'content')) - slot.start).toBeLessThanOrEqual(0); // the slot's first item is at or before it
+        expect(r.planned!.find((x) => x.start === slot.start)!.start % grid).toBe(0);
+      } else {
+        expect(inLineup).toBe(false);
+        expect(s.store.stagedSlots(id).some((r2) => r2.start === slot.start)).toBe(true); // still waiting
+      }
+      s.clock.t += DAY;
+    }
+    expect(reached).toBe(true);
   });
 });
 
@@ -600,6 +727,111 @@ describe('the preview diff', () => {
     const d = await stageDiff(s.deps, 'Test');
     expect(d.changes.some((c) => c.kind === 'new' && c.slotId.startsWith('added@'))).toBe(true);
     expect(await stageDiff(setup().deps, 'Test')).toMatchObject({ changes: [], staged: 0 });
+  });
+
+  it('the calendar tells staged slots from planned ones, and marks what was done by hand', async () => {
+    const s = await staged();
+    const edge = s.store.channel('Test')!.edge;
+    const range = { from: edge, to: edge + 8 * DAY };
+    const plain = await calendarPlan(s.deps, 'Test', range);
+    const stagedStarts = new Set(s.store.stagedSlots(s.id).filter((r) => r.start < edge + 8 * DAY).map((r) => r.start));
+    expect(plain.slots.filter((x) => x.source === 'staged').map((x) => x.slot.start).sort((a, b) => a - b)).toEqual([...stagedStarts].sort((a, b) => a - b));
+    expect(plain.slots.some((x) => x.source === 'planned')).toBe(true);
+    // Staged but untouched: stored, and exactly the plan.
+    expect(plain.slots.filter((x) => x.source === 'staged').every((x) => x.hand.length === 0 && !x.differs && x.plan.length === 0)).toBe(true);
+    // Never planned past eight weeks.
+    expect((await calendarPlan(s.deps, 'Test', { from: edge, to: edge + 100 * DAY })).to).toBe(edge + 56 * DAY);
+
+    const slot = s.full.find((x) => x.pool === 'sitcoms')!;
+    s.store.setPin('Test', slot.start, 2, { id: 'ep200', title: 'Pinned', duration: 22 * MIN + 1000 });
+    await stageRefresh(s.deps, 'Test', slot.start);
+    s.store.setLocked('Test', slot.start, true);
+    const hand = (await calendarPlan(s.deps, 'Test', range)).slots.find((x) => x.slot.start === slot.start)!;
+    expect(hand).toMatchObject({ source: 'staged', differs: true });
+    expect(hand.hand).toEqual(expect.arrayContaining(['1 pin', 'locked']));
+    expect(hand.plan.length).toBeGreaterThan(0);
+    expect(hand.totals.programMs).toBeGreaterThan(0);
+  });
+
+  it('a rerun plays the earlier episode in a block and uses up no new episode, so the show does not skip one', async () => {
+    const s = await staged();
+    const edge = s.store.channel('Test')!.edge;
+    const range = { from: edge, to: edge + 8 * DAY };
+    const before = await calendarPlan(s.deps, 'Test', range);
+    const sit = before.slots.filter((x) => x.source === 'staged' && x.slot.pool === 'sitcoms' && x.slot.blocks.length >= 2);
+    const slot = sit[0]!, later = sit[1]!;
+    const id = slot.slot.blocks[1]!.programId;
+    expect(before.rerunnable).toContain(id);
+    const nextBefore = Number(later.slot.blocks[0]!.programId.slice(2));
+
+    await stageRerun(s.deps, 'Test', { start: slot.slot.start, block: 2, pool: 'sitcoms', programId: id });
+    const after = await calendarPlan(s.deps, 'Test', range);
+    const now = after.slots.find((x) => x.slot.start === slot.slot.start)!;
+    expect(now.slot.blocks[1]).toMatchObject({ pinned: true, programId: slot.slot.blocks[0]!.programId });
+    expect(now.hand).toContain('1 pin');
+    // The next new episode comes one earlier than before: the rerun took none.
+    expect(Number(after.slots.find((x) => x.slot.start === later.slot.start)!.slot.blocks[0]!.programId.slice(2))).toBe(nextBefore - 1);
+
+    await expect(stageRerun(s.deps, 'Test', { start: slot.slot.start, block: 1, pool: 'movies', programId: 'mov1' })).rejects.toThrow(/in order/);
+    await expect(stageRerun(s.deps, 'Test', { start: slot.slot.start, block: 1, pool: 'sitcoms', programId: 'ep1' })).rejects.toThrow(/first episode/);
+  });
+
+  it('a block rerun is offered only in a pool of one show: with turns between shows it would upset them', () => {
+    const titles = { a1: 'TNG S1E1 "x"', b1: 'Lower Decks S1E1 "y"', a2: 'TNG S1E2 "x"', b2: 'Lower Decks S1E2 "y"', a3: 'TNG S1E3 "x"' };
+    const mixed = { order: 'ordered' as const, programs: ['a1', 'b1', 'a2', 'b2', 'a3'] };
+    expect(earlierEpisode(mixed, 'b2', titles)).toBeUndefined();
+    expect(earlierEpisode(mixed, 'a3', titles)).toBeUndefined();
+    const one = { order: 'ordered' as const, programs: ['a1', 'a2', 'a3'] };
+    expect(earlierEpisode(one, 'a3', titles)).toBe('a2');
+    expect(earlierEpisode(one, 'a1', titles)).toBeUndefined(); // the first
+    expect(earlierEpisode({ order: 'shuffled', programs: ['a1', 'a2'] }, 'a2', titles)).toBeUndefined();
+  });
+
+  it('the calendar reads the library once, however many weeks are asked for, and again when the schedule changes', async () => {
+    const s = await staged();
+    // Its own schedule text, so nothing an earlier test read is reused.
+    s.store.setSchedule('Test', s.store.channel('Test')!.schedule + '\n# calendar cache test\n', Date.now());
+    const edge = s.store.channel('Test')!.edge;
+    const shows = vi.spyOn(s.deps.client, 'shows');
+    const week = (n: number) => ({ from: edge + n * 7 * DAY, to: edge + (n + 1) * 7 * DAY });
+    // Made together (as the page does when scrolled) and then one after another.
+    const [a, b] = await Promise.all([calendarPlan(s.deps, 'Test', week(0)), calendarPlan(s.deps, 'Test', week(1))]);
+    const again = await calendarPlan(s.deps, 'Test', week(0));
+    await calendarPlan(s.deps, 'Test', week(2));
+    expect(shows.mock.calls.length).toBe(1);
+    expect(again.slots.map((x) => [x.slot.start, x.source, x.slot.programs])).toEqual(a.slots.map((x) => [x.slot.start, x.source, x.slot.programs]));
+    expect(b.slots.length).toBeGreaterThan(0);
+    // A saved schedule is a different key: read again.
+    const ch = s.store.channel('Test')!;
+    s.store.setSchedule('Test', ch.schedule + '\n# changed\n', Date.now());
+    await calendarPlan(s.deps, 'Test', week(0));
+    expect(shows.mock.calls.length).toBe(2);
+  });
+
+  it('the committed lineup is cut into blocks, each with its own breaks', () => {
+    const f = (id: string, type: string, duration: number) => ({ type: 'filler', id, fillerListId: id.startsWith('b') ? 'L-bump' : 'L-ads', fillerType: type, duration });
+    const c = (id: string, offset: number, duration: number) => ({ type: 'content', id, startOffsetMs: offset, duration });
+    const lineup = [
+      f('b1', 'head', 20_000), f('a1', 'head', 60_000), c('m1', 0, 600_000), f('a2', 'mid', 30_000), c('m1', 600_000, 600_000), f('a3', 'post', 30_000),
+      f('a4', 'pre', 10_000), c('m2', 0, 900_000), { type: 'flex', duration: 5_000 },
+    ];
+    const start = 1_000_000;
+    const roleOf = (id: string, type: string) => (type === 'fallback' ? 'interstitial' as const : id === 'L-bump' ? 'bumper' as const : 'ad' as const);
+    const all = blocksFromLineup(lineup, start, { from: 0, to: Number.MAX_SAFE_INTEGER }, roleOf, (id) => id);
+    expect(all.map((b) => [b.programs, b.start, b.end])).toEqual([[['m1'], start, start + 1_340_000], [['m2'], start + 1_340_000, start + 1_340_000 + 10_000 + 900_000 + 5_000]]);
+    expect(all[0]!.items.map((i) => i.kind === 'filler' ? `${i.position}:${i.role}` : i.kind)).toEqual(['head:bumper', 'head:ad', 'content', 'mid:ad', 'content', 'post:ad']);
+    expect(all[0]!.totals).toMatchObject({ programMs: 1_200_000, adMs: 120_000, bumperMs: 20_000 });
+    expect(all[1]!.items[0]).toMatchObject({ kind: 'filler', position: 'pre' }); // the pre break belongs to the program after it
+    expect(all[1]!.totals.deadAirMs).toBe(5_000);
+    // Neighbouring blocks of one pool are one run, like a slot.
+    const runs = runsOf(all, new Map([['m1', 'sitcoms'], ['m2', 'sitcoms']]));
+    expect(runs).toHaveLength(1);
+    expect(runs[0]).toMatchObject({ pool: 'sitcoms', start, programs: ['m1', 'm2'] });
+    expect(runs[0]!.blocks.map((b) => b.programId)).toEqual(['m1', 'm2']);
+    expect(runs[0]!.totals.programMs).toBe(2_100_000);
+    expect(runsOf(all, new Map([['m1', 'sitcoms']])).map((r) => r.pool)).toEqual(['sitcoms', null]);
+    // Only blocks that overlap the range.
+    expect(blocksFromLineup(lineup, start, { from: start + 1_400_000, to: start + 1_500_000 }, roleOf, (id) => id).map((b) => b.programs)).toEqual([['m2']]);
   });
 
   it('a new schedule is dry-run against the staged slots, and writes nothing', async () => {
@@ -870,6 +1102,89 @@ describe('what a pool holds', () => {
     expect(stats['comedies']!.durations.every((d) => d <= 95 * MIN)).toBe(true);
     expect(stats['comedies']!.durations).toEqual([...stats['comedies']!.durations].sort((a, b) => a - b));
     expect(stats['ghost']).toMatchObject({ count: 0, error: expect.stringContaining('no show named "Nope"') });
-    expect(stats['none']).toEqual({ count: 0, durations: [] });
+    expect(stats['none']).toMatchObject({ count: 0, durations: [] });
+  });
+});
+
+
+describe('pool changes', () => {
+  const schedule = { pools: { movies: { order: 'shuffled', programs: ['a', 'b', 'c', 'd'] }, shows: { order: 'ordered', programs: ['x'] } } } as unknown as Schedule;
+  const titles = { a: 'A', b: 'B', c: 'C', d: 'D', x: 'X' };
+  it('says nothing the first time, and when nothing changed', () => {
+    expect(poolChanges(undefined, schedule, titles, 0)).toEqual([]);
+    expect(poolChanges({ movies: ['a', 'b', 'c', 'd'], shows: ['x'] }, schedule, titles, 0)).toEqual([]);
+  });
+  it('names what joined and what left, and warns when a pool more than doubles', () => {
+    const w = poolChanges({ movies: ['a', 'b', 'z'], shows: ['x'] }, schedule, titles, 5);
+    expect(w).toHaveLength(1);
+    expect(w[0]).toMatchObject({ code: 'pool-changed', severity: 'info', slotId: 'movies', at: 5 });
+    expect(w[0]!.message).toContain('2 joined (C; D)');
+    expect(w[0]!.message).toContain('1 left (z)');
+    expect(poolChanges({ movies: ['a'], shows: ['x'] }, schedule, titles, 0)[0]).toMatchObject({ severity: 'warning' });
+  });
+});
+
+describe('creating a channel', () => {
+  const opts = { name: 'Late Night', number: 9, hidden: true, timezone: 'America/Toronto', adList: 'Ads', fillerList: 'Fillers', floorMs: 7 * DAY, stepMs: DAY, seed: 1 };
+
+  it('writes the channel file with an empty week, and the lists named', () => {
+    const f = parseScheduleFile(newChannelFile(opts));
+    expect(f).toMatchObject({ channel: 'Late Night', timezone: 'America/Toronto', grid: 15 * MIN, interstitial: { list: 'Fillers' }, week: {} });
+    expect(f.ads.mid?.list).toBe('Ads');
+    expect(Object.keys(f.pools)).toEqual([]);
+    expect(parseScheduleFile(newChannelFile({ name: 'Plain "quoted"', timezone: 'UTC' })).channel).toBe('Plain "quoted"');
+  });
+
+  it('takes the grid chosen, and refuses one that is not offered', async () => {
+    expect(parseScheduleFile(newChannelFile({ ...opts, gridMinutes: 30 })).grid).toBe(30 * MIN);
+    expect(() => newChannelFile({ ...opts, gridMinutes: 7 })).toThrow(/grid must be one of/);
+    const s = setup();
+    s.clock.t = NOW0 + 7 * MIN;
+    await createChannel(s.deps, { ...opts, gridMinutes: 30 });
+    expect(s.fake.created[0]!['startTime']).toBe(Math.floor(s.clock.t / (30 * MIN)) * 30 * MIN);
+    expect(parseScheduleFile(s.store.channel('Late Night')!.schedule).grid).toBe(30 * MIN);
+  });
+
+  it('creates a hidden channel in Tunarr starting now on the grid, and adds it to the store', async () => {
+    const s = setup();
+    s.clock.t = NOW0 + 7 * MIN;
+    const r = await createChannel(s.deps, opts);
+    const made = s.fake.created[0]!;
+    expect(made).toMatchObject({ name: 'Late Night', number: 9, stealth: true, duration: 0, transcodeConfigId: 'tc-default' });
+    expect(made['startTime']).toBe(Math.floor(s.clock.t / (15 * MIN)) * 15 * MIN);
+    expect(r).toMatchObject({ name: 'Late Night', edge: made['startTime'] });
+    expect(s.store.channel('Late Night')).toMatchObject({ tunarrId: made['id'] });
+  });
+
+  it('refuses a number or name in use, an empty name, and a list Tunarr does not have, creating nothing', async () => {
+    const s = setup();
+    await expect(createChannel(s.deps, { ...opts, number: 1 })).rejects.toThrow(/choose another number/);
+    await expect(createChannel(s.deps, { ...opts, name: 'test' })).rejects.toThrow(/choose another name/);
+    await expect(createChannel(s.deps, { ...opts, name: '  ' })).rejects.toThrow(/give the channel a name/);
+    await expect(createChannel(s.deps, { ...opts, adList: 'No such list' })).rejects.toThrow();
+    expect(s.fake.created).toEqual([]);
+  });
+
+  it('plans nothing for a channel with no slots, and writes nothing', async () => {
+    const s = setup();
+    await createChannel(s.deps, opts);
+    const r = await topUp(s.deps, 'Late Night');
+    expect(r.action).toBe('none');
+    expect(s.fake.requests.filter((x) => x.includes('programming') && x.startsWith('POST'))).toEqual([]);
+  });
+
+  it('first plan of a channel that has sat empty for days: a flex bridges to the grid line before now, and nothing is planned in the past', async () => {
+    const s = setup();
+    await createChannel(s.deps, opts);
+    const startTime = s.fake.created[0]!['startTime'] as number;
+    s.clock.t = startTime + 3 * DAY + 7 * MIN; // nobody designed a schedule for three days
+    expect((await topUp(s.deps, 'Late Night')).action).toBe('none'); // still no slots: nothing written, nothing refused
+    s.store.setSchedule('Late Night', YAML.replace(/^channel: .*$/m, 'channel: Late Night'), s.clock.t);
+    const r = await topUp(s.deps, 'Late Night');
+    expect(r.action).toBe('appended');
+    const nowLine = Math.floor(s.clock.t / (15 * MIN)) * 15 * MIN;
+    expect(r.planned![0]!.start).toBe(nowLine);
+    expect(s.fake.createdLineup[0]).toMatchObject({ type: 'flex', duration: nowLine - startTime });
+    expect(s.store.channel('Late Night')!.edge).toBeGreaterThan(s.clock.t + 7 * DAY);
   });
 });

@@ -116,11 +116,41 @@ export function adjustPosition(position: number, adjustment: CursorAdjustment, l
 export interface SequenceState {
   position: number;
   history: number;
+  /**
+   * The last episode taken (planned and committed). The show's list changes when episodes arrive or go, so the number alone can
+   * point at the wrong episode; the next one is whatever follows this one in the list as it is now.
+   */
+  last?: string;
+}
+
+export interface PlaceCheck {
+  seq: SequenceState;
+  /** What changed, for a note: the place moved because the list changed, or the last episode is gone from it. */
+  note?: { kind: 'moved' | 'lost'; from: number; to: number };
+}
+
+/** The place in the list as it stands now: right after the last episode taken when that is still in the list. */
+export function placeInList(seq: SequenceState, list: readonly string[]): PlaceCheck {
+  if (seq.last === undefined || list.length === 0) return { seq };
+  const at = list.indexOf(seq.last);
+  if (at < 0) return { seq: { position: seq.position, history: seq.history }, note: { kind: 'lost', from: seq.position, to: seq.position } };
+  const position = (at + 1) % list.length;
+  if (position === seq.position % list.length) return { seq };
+  return { seq: { ...seq, position }, note: { kind: 'moved', from: seq.position, to: position } };
+}
+
+/** The sequence after `taken` more episodes starting at its place: its place, history and last episode. */
+export function advanceSequence(seq: SequenceState, list: readonly string[], taken: number): SequenceState {
+  if (taken <= 0 || list.length === 0) return seq;
+  const position = (seq.position + taken) % list.length;
+  return { position, history: seq.history + taken, last: list[(seq.position + taken - 1) % list.length]! };
 }
 
 /** A manual adjustment also changes how much history lies behind the head. */
-export function adjustSequence(seq: SequenceState, adjustment: CursorAdjustment, length: number): SequenceState {
+export function adjustSequence(seq: SequenceState, adjustment: CursorAdjustment, length: number, list?: readonly string[]): SequenceState {
   const position = adjustPosition(seq.position, adjustment, length);
   const back = adjustment.kind === 'rewind' ? adjustment.by : Math.max(0, seq.position - position);
-  return { position, history: Math.max(0, seq.history - back) };
+  const history = Math.max(0, seq.history - back);
+  const last = list && !(position === 0 && history === 0) ? list[(position - 1 + length) % length] : undefined;
+  return { position, history, ...(last !== undefined ? { last } : {}) };
 }

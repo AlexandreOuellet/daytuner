@@ -49,7 +49,7 @@ describe('plan: a Monday evening', () => {
 
   it('fills the 18:00 slot with the first four episodes, one per half hour', () => {
     expect(result.slots[0]!.programs).toEqual(episodes(4));
-    expect(result.state.sequences['seq:office']).toEqual({ position: 4, history: 4 });
+    expect(result.state.sequences['seq:office']).toEqual({ position: 4, history: 4, last: 'ep4' });
   });
 
   it('picks a movie that fits the 20:00 slot from the shuffled pool', () => {
@@ -63,7 +63,7 @@ describe('plan: a Monday evening', () => {
     const rerun = result.slots[2]!;
     // 1h45 holds three half-hour blocks: the three episodes before the head (position 4).
     expect(rerun.programs).toEqual(['ep2', 'ep3', 'ep4']);
-    expect(result.state.sequences['seq:office']).toEqual({ position: 4, history: 4 });
+    expect(result.state.sequences['seq:office']).toEqual({ position: 4, history: 4, last: 'ep4' });
   });
 
   it('splits each program at its mid breaks and breaks it with ads', () => {
@@ -267,6 +267,58 @@ describe('plan: dead air warnings', () => {
   });
 });
 
+describe('plan: a show whose list changes', () => {
+  const lib = fixtureLibrary();
+  lib.programs['ep1b'] = { duration: 22 * MINUTE + 17 * SECOND + 431 };
+  const list = ['ep1', 'ep1b', ...episodes(12).slice(1)];
+  const withList = (programs: string[]) => fixtureSchedule({ pools: { office: { order: 'ordered', programs }, movies: { order: 'shuffled', programs: ['m1', 'm2', 'm3'] } } });
+  const first = (state: ReturnType<typeof freshState>, programs: string[]) =>
+    plan({ schedule: withList(programs), library: lib, state, from: MONDAY_18, to: TUESDAY_00 });
+
+  it('plays an episode that arrived behind the place before the one after it, when nothing later was taken', () => {
+    const state = freshState();
+    state.sequences['seq:office'] = { position: 1, history: 1, last: 'ep1' };
+    const r = first(state, list);
+    expect(r.slots[0]!.programs.slice(0, 2)).toEqual(['ep1b', 'ep2']);
+    expect(r.warnings.some((w) => w.code === 'place-moved')).toBe(false);
+  });
+
+  it('does not play an episode again when one arrived behind an episode that was already taken, and says so', () => {
+    const state = freshState();
+    state.sequences['seq:office'] = { position: 2, history: 2, last: 'ep2' }; // the list was [ep1, ep2, ep3, ...]
+    const r = first(state, list);
+    expect(r.slots[0]!.programs[0]).toBe('ep3');
+    expect(r.warnings.filter((w) => w.code === 'place-moved')).toHaveLength(1);
+    expect(r.state.sequences['seq:office']!.last).not.toBe('ep2');
+  });
+
+  it('keeps the number and warns when the last episode is no longer in the list', () => {
+    const state = freshState();
+    state.sequences['seq:office'] = { position: 2, history: 2, last: 'gone' };
+    const r = first(state, list);
+    expect(r.slots[0]!.programs[0]).toBe(list[2]);
+    expect(r.warnings.some((w) => w.code === 'place-lost')).toBe(true);
+  });
+
+  it('works as before for a store that has no last episode yet', () => {
+    const state = freshState();
+    state.sequences['seq:office'] = { position: 2, history: 2 };
+    expect(first(state, list).slots[0]!.programs[0]).toBe(list[2]);
+  });
+});
+
+describe('plan: repeats', () => {
+  it('says so when a shuffled pool shows a program again because nothing left in its round fit', () => {
+    const week = fixtureSchedule({ week: [{ day: 0, at: 10 * HOUR, pool: 'movies' }, { day: 1, at: 20 * HOUR, pool: 'movies' }] });
+    const found = new Set<string>();
+    for (let seed = 1; seed <= 40; seed++) {
+      const r = plan({ schedule: week, library, state: freshState(seed), from: local(2026, 11, 8, 10), to: local(2026, 11, 29, 10) });
+      for (const w of r.warnings.filter((x) => x.code === 'repeat-pick')) { expect(w.severity).toBe('info'); found.add(w.message); }
+    }
+    expect(found.size).toBeGreaterThan(0);
+  }, 60_000);
+});
+
 describe('plan: any seed, any day', () => {
   it('is always sound over many seeds and a week of windows', () => {
     const week = fixtureSchedule({
@@ -297,6 +349,11 @@ describe('plan: bad input', () => {
     expect(() => run({ schedule: fixtureSchedule({ pools: { movies: { order: 'shuffled', programs: ['ghost'] } }, week: [{ day: 1, at: 0, pool: 'movies' }] }) })).toThrow(RangeError);
     expect(() => run({ schedule: fixtureSchedule({ week: [{ day: 1, at: 7 * MINUTE, pool: 'movies' }] }) })).toThrow(RangeError);
     expect(() => run({ schedule: fixtureSchedule({ zone: 'Mars/Olympus' }) })).toThrow(RangeError);
+  });
+
+  it('plans nothing, without failing, for a schedule that has no slots yet', () => {
+    const r = run({ schedule: { ...fixtureSchedule(), week: [] } });
+    expect(r.slots).toEqual([]);
   });
 });
 

@@ -16,8 +16,8 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { parseArgs } from 'node:util';
 import { alignToGrid, TunarrClient, type FetchLike } from '@daytuner/tunarr-client';
-import { ceilToGrid, computeMetrics, DAY, emptyPlanState, plan, type Clock } from '@daytuner/engine';
-import { addIds, diffLines, findProgram, formatDiff, parseDuration, parseLocalDateTime, parseScheduleFile, resolveSchedule } from '@daytuner/schedule';
+import { ceilToGrid, computeMetrics, DAY, emptyPlanState, placeInList, plan, type Clock } from '@daytuner/engine';
+import { addIds, diffLines, findProgram, formatDiff, makeLibraryReader, parseDuration, parseLocalDateTime, parseScheduleFile, resolveSchedule } from '@daytuner/schedule';
 import { Store } from '@daytuner/store';
 import { adjustCursor, adoptHistory, cachedSource, ConsistencyError, cursorPreview, listSequences, placesFromLineup, resync, revisionImpact, stageCheck, stageDiff, stageEdit, stageGenerate, stageRefresh, topUp } from '@daytuner/worker';
 import { formatChanges, formatMetrics, formatWarnings, inZone, slotLabel } from './format.js';
@@ -43,6 +43,7 @@ const USAGE = `Usage:
                    | delete DATETIME | resize DATETIME --end DATE | add DATETIME --end DATE movie:TITLE | diff | clear [--from DATE] [--to DATE]
                                         (dates are local to the channel: 2026-10-31 or 2026-10-31T20:00)
   daytuner chapters clear                (forget the cached chapters; they are read again at the next plan)
+  daytuner pool <name | channel.yaml> [<pool>] [--all]   (what each pool holds now: its shows or movies, how many programs, a sample)
   daytuner run <name> [--yes]            (a dry run without --yes)
   daytuner cursor <name> list | preview <sequence> rewind|set <n> | rewind <sequence> <k> | set <sequence> <episode-number>
 Common: --tunarr URL (or TUNARR_URL)  --db FILE (or DAYTUNER_DB, default state/daytuner.db)`;
@@ -58,6 +59,7 @@ export async function runCli(argv: string[], io: CliEnv): Promise<number> {
       tunarr: { type: 'string' }, db: { type: 'string' }, channel: { type: 'string' }, from: { type: 'string' },
       days: { type: 'string', default: '7' }, seed: { type: 'string', default: '1' },
       to: { type: 'string' }, keep: { type: 'string' }, end: { type: 'string' }, out: { type: 'string' },
+      all: { type: 'boolean', default: false },
       floor: { type: 'string', default: '7d' }, step: { type: 'string', default: '24h' }, yes: { type: 'boolean', default: false },
     },
   });
@@ -410,6 +412,40 @@ export async function runCli(argv: string[], io: CliEnv): Promise<number> {
       }
     }
 
+    if (command === 'pool' && rest[0]) {
+      const what = rest[0];
+      const isFile = /\.ya?ml$/i.test(what);
+      const store = isFile ? undefined : openStore();
+      let text: string;
+      if (isFile) text = readFileSync(what, 'utf8');
+      else {
+        const ch = store!.channel(what);
+        if (!ch) throw new Error(`no channel named "${what}"`);
+        text = ch.schedule;
+      }
+      const file = parseScheduleFile(text);
+      const client = reader();
+      const source = store ? cachedSource(client, store, io.clock) : client;
+      const reading = makeLibraryReader(source);
+      const names = rest[1] ? [rest[1]] : Object.keys(file.pools);
+      for (const name of names) {
+        const def = file.pools[name];
+        if (!def) throw new Error(`no pool named "${name}" (pools: ${Object.keys(file.pools).join(', ')})`);
+        try {
+          const r = await reading.pool(def);
+          const hours = r.ids.reduce((a, id) => a + r.programs[id]!.duration, 0) / 3_600_000;
+          io.out(`${name}: ${r.ids.length} ${def.shows ? 'episodes' : 'movies'}, ${hours.toFixed(1)} hours, ${r.order}`);
+          for (const m of r.members ?? []) io.out(`  ${m.title} (${m.episodes} episodes)`);
+          if (!def.shows || values.all) for (const id of r.ids.slice(0, values.all ? Infinity : 25)) io.out(`  - ${r.titles[id] ?? id}`);
+          if (!values.all && !def.shows && r.ids.length > 25) io.out(`  … and ${r.ids.length - 25} more (--all lists them)`);
+        } catch (e) {
+          io.out(`${name}: cannot be read: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
+      store?.close();
+      return 0;
+    }
+
     if (command === 'cursor' && rest[0] && rest[1]) {
       const [name, sub, key, amount] = rest;
       const store = openStore();
@@ -419,7 +455,7 @@ export async function runCli(argv: string[], io: CliEnv): Promise<number> {
       if (sub === 'list') {
         const { schedule } = await resolveSchedule(parseScheduleFile(ch.schedule), cachedSource(client, store, io.clock));
         for (const s of listSequences(schedule)) {
-          const st = ch.state.sequences[s.key] ?? { position: 0, history: 0 };
+          const st = placeInList(ch.state.sequences[s.key] ?? { position: 0, history: 0 }, schedule.pools[s.pool]!.programs).seq;
           io.out(`${s.key}  pool ${s.pool}  next episode ${st.position + 1} of ${s.length}  (${st.history} behind it have aired)  slots ${s.slots.join(', ')}`);
         }
         store.close();

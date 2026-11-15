@@ -16,6 +16,7 @@ Open <http://127.0.0.1:8420>. Settings, all environment variables:
 |---|---|---|
 | `TUNARR_URL` | Where Tunarr is. Required. | |
 | `DAYTUNER_ALLOW_WRITES` | `1` lets this container write lineups to Tunarr and run the daily scheduler. Without it DayTuner plans, previews and edits staging, and cannot write. | off |
+| `TZ` | The server's time zone. A channel created from the page gets it (a container is UTC unless this is set). | the system's |
 | `DAYTUNER_DB` | The SQLite file | `/config/daytuner.db` |
 | `DAYTUNER_HOST`, `DAYTUNER_PORT` | Where it listens | `0.0.0.0`, `8420` in the image |
 | `DAYTUNER_UI_DIR` | The built pages | `/app/apps/ui/dist` |
@@ -25,7 +26,7 @@ only to yourself (`-p 127.0.0.1:8420:8420`), or behind your own authentication.
 
 ## First steps
 
-Add a channel from a channel file (see `schedules/example.yaml`), either with the command line in the container or through the API:
+Add a channel from the page ("Add a channel": create one in Tunarr, which needs writing on, or attach one that exists), or from a channel file (see `schedules/example.yaml`), either with the command line in the container or through the API:
 
 ```
 docker cp my-channel.yaml daytuner:/config/my-channel.yaml
@@ -57,7 +58,8 @@ way in Tunarr's stock player. Playing the ad and filler clips of a DayTuner line
 ## Kubernetes
 
 [`deploy/kubernetes.example.yaml`](../deploy/kubernetes.example.yaml) has a volume, a deployment (one replica: the database has one
-owner) and a service. Add an ingress with your own authentication in front.
+owner) and a service. It has no ingress: exposing it, with authentication in front (DayTuner has no login), is part of your
+cluster's own configuration, not of this repository.
 
 ## Updating
 

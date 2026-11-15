@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { Library, PoolModel, PoolStats } from '../api';
 import { minutes } from '../format';
+import { MovieRules, ShowRules, toRules } from './RulesEditor';
 
 interface Props {
   pools: Record<string, PoolModel>;
@@ -12,7 +13,8 @@ interface Props {
   onChange: (name: string, pool: PoolModel | null) => void;
 }
 
-const kindOf = (p: PoolModel): string => (p.shows ? 'shows' : 'movies');
+const isShows = (p: PoolModel): boolean => p.shows !== undefined || (p.raw !== undefined && 'shows' in p.raw);
+const kindOf = (p: PoolModel): string => `${p.raw ? 'rules, ' : ''}${isShows(p) ? 'shows' : 'movies'}`;
 
 function Summary({ name, stats, shortest }: { name: string; stats: PoolStats | undefined; shortest: number | undefined }) {
   if (!stats) return <p className="muted small">Counting…</p>;
@@ -20,10 +22,22 @@ function Summary({ name, stats, shortest }: { name: string; stats: PoolStats | u
   if (stats.count === 0) return <p className="warn-note small">Nothing in the library matches {name}.</p>;
   const fit = shortest === undefined ? undefined : stats.durations.filter((d) => d <= shortest).length;
   return (
+    <>
     <p className="muted small">
       {stats.count} program{stats.count === 1 ? '' : 's'}, {minutes(stats.durations[0]!)} to {minutes(stats.durations[stats.durations.length - 1]!)} min
       {fit !== undefined && <>; {fit} fit{fit === 1 ? 's' : ''} the shortest slot that uses {name} ({Math.round(shortest! / 60_000)} min)</>}.
     </p>
+    {stats.members && stats.members.length > 0 && (
+      <details><summary className="small">{stats.members.length} show{stats.members.length === 1 ? '' : 's'}</summary>
+        <ul className="small">{stats.members.map((m) => <li key={m.title}>{m.title} <span className="muted">({m.episodes} episodes)</span></li>)}</ul>
+      </details>
+    )}
+    {stats.sample && stats.sample.length > 0 && (
+      <details><summary className="small">{stats.members ? 'Episodes' : 'Movies'} it holds{stats.count > stats.sample.length ? ` (first ${stats.sample.length})` : ''}</summary>
+        <ul className="small">{stats.sample.map((t, i) => <li key={i}>{t}</li>)}</ul>
+      </details>
+    )}
+    </>
   );
 }
 
@@ -46,6 +60,13 @@ export function PoolsPanel({ pools, stats, library, shortestSlot, used, onChange
           <article key={name} className="card poolcard">
             <header><h3>{name}</h3><span className="chip">{kindOf(p)}</span></header>
             <Summary name={name} stats={stats[name]} shortest={shortestSlot[name]} />
+            {p.raw && (
+              <>
+                {'shows' in p.raw
+                  ? <ShowRules name={name} raw={p.raw} library={library} onChange={(raw) => onChange(name, { ...p, raw })} />
+                  : <MovieRules name={name} raw={p.raw} library={library} onChange={(raw) => onChange(name, { ...p, raw })} />}
+              </>
+            )}
             {p.shows && (
               <>
                 <ul className="chips">
@@ -83,7 +104,7 @@ export function PoolsPanel({ pools, stats, library, shortestSlot, used, onChange
             )}
             <fieldset className="row">
               <legend className="small muted">Order</legend>
-              {p.shows ? (
+              {isShows(p) ? (
                 <>
                   <label><input type="radio" name={`order-${name}`} checked={p.order !== 'shuffle'} onChange={() => onChange(name, { ...p, order: 'sequential' })} /> in order, never skipping</label>
                   <label><input type="radio" name={`order-${name}`} checked={p.order === 'shuffle'} onChange={() => onChange(name, { ...p, order: 'shuffle' })} /> shuffled</label>
@@ -95,6 +116,7 @@ export function PoolsPanel({ pools, stats, library, shortestSlot, used, onChange
                 </>
               )}
             </fieldset>
+            {!p.raw && <button type="button" onClick={() => onChange(name, toRules(p))}>Edit as rules</button>}
             <button type="button" onClick={() => onChange(name, null)} disabled={used.has(name)} title={used.has(name) ? 'Some slot uses this pool' : undefined}>Remove pool</button>
           </article>
         );

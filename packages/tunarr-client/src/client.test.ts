@@ -60,7 +60,62 @@ describe('reading', () => {
     const movies = await new TunarrClient('http://tunarr.test', f).movies();
     expect(seen).toEqual([0, 1]);
     expect(movies.map((m) => m.id)).toEqual(['m0', 'm1']);
-    expect(movies[0]).toEqual({ id: 'm0', title: 'Movie 0', duration: 5_400_000, genres: ['Comedy'], year: 1990 });
+    expect(movies[0]).toEqual({ id: 'm0', title: 'Movie 0', duration: 5_400_000, genres: ['Comedy'], year: 1990, rating: null, studios: [], tags: [], actors: [], directors: [] });
+  });
+
+  it('reads rating, studios, tags, actors and directors of a movie', async () => {
+    const f: FetchLike = async () => ({ ok: true, status: 200, text: async () => JSON.stringify({
+      results: [{ uuid: 'm', title: 'M', duration: 6_000_000, genres: [], year: 2001, rating: 'PG', studios: [{ name: 'Acme' }], tags: ['spoof'], actors: [{ name: 'A' }, { name: 'B' }], directors: [{ name: 'D' }] }],
+      page: 0, totalPages: 1, totalHits: 1,
+    }) });
+    expect((await new TunarrClient('http://tunarr.test', f).movies())[0]).toMatchObject({ rating: 'PG', studios: ['Acme'], tags: ['spoof'], actors: ['A', 'B'], directors: ['D'] });
+  });
+
+  it('asks the index for the ids behind a language or a show genre, and returns show ids for episodes', async () => {
+    const bodies: { query: { filter: { children: { fieldSpec: { key: string; value: string[] } }[] } } }[] = [];
+    const f: FetchLike = async (url, init) => {
+      if (url.endsWith('/search')) bodies.push(JSON.parse(init?.body ?? '{}'));
+      return { ok: true, status: 200, text: async () => JSON.stringify({ results: [{ uuid: 'e1', showId: 's1' }, { uuid: 'e2', showId: 's1' }, { uuid: 'e3', showId: 's2' }], page: 0, totalPages: 1, totalHits: 3 }) };
+    };
+    const c = new TunarrClient('http://tunarr.test', f);
+    expect([...(await c.idsWhere('show', 'genre', ['Comedy']))].sort()).toEqual(['s1', 's2']);
+    expect(bodies[0]!.query.filter.children.map((x) => x.fieldSpec.key)).toEqual(['type', 'grandparent.genres']);
+    expect([...(await c.idsWhere('movie', 'audio', ['fra']))].sort()).toEqual(['e1', 'e2', 'e3']);
+    expect(bodies[1]!.query.filter.children.map((x) => x.fieldSpec.key)).toEqual(['type', 'audioLanguages']);
+    expect(bodies[1]!.query.filter.children[1]!.fieldSpec.value).toEqual(['fra']);
+  });
+
+  describe('shows behind a filter, from one facet call', () => {
+    const SHOWS = [{ uuid: 's1', title: 'Alpha' }, { uuid: 's2', title: 'Beta' }, { uuid: 's3', title: 'Beta' }];
+    const make = (facet: Record<string, number>) => {
+      const calls: string[] = [];
+      const f: FetchLike = async (url, init) => {
+        const body = JSON.parse(init?.body ?? '{}');
+        calls.push(url.replace('http://tunarr.test', ''));
+        if (url.endsWith('/facets/grandparent.title')) return { ok: true, status: 200, text: async () => JSON.stringify({ facetValues: facet }) };
+        const isShows = JSON.stringify(body).includes('"show"');
+        const narrowed = JSON.stringify(body).includes('grandparent.title');
+        const results = isShows ? SHOWS : narrowed ? [{ uuid: 'e1', showId: 's3' }] : [{ uuid: 'e1', showId: 's1' }, { uuid: 'e2', showId: 's2' }];
+        return { ok: true, status: 200, text: async () => JSON.stringify({ results, page: 0, totalPages: 1, totalHits: results.length }) };
+      };
+      return { c: new TunarrClient('http://tunarr.test', f), calls };
+    };
+    it('maps the titles to ids, and asks about a shared title separately', async () => {
+      const { c, calls } = make({ Alpha: 4, Beta: 2 });
+      expect([...(await c.idsWhere('show', 'genre', ['Comedy']))].sort()).toEqual(['s1', 's3']);
+      expect(calls.filter((x) => x.includes('/facets/'))).toHaveLength(1);
+    });
+    it('pages through the episodes when the facet may have been cut short, or names a title no show has', async () => {
+      const full = Object.fromEntries(Array.from({ length: 100 }, (_, i) => [`T${i}`, 1]));
+      expect([...(await make(full).c.idsWhere('show', 'genre', ['Comedy']))].sort()).toEqual(['s1', 's2']);
+      expect([...(await make({ Ghost: 1 }).c.idsWhere('show', 'genre', ['Comedy']))].sort()).toEqual(['s1', 's2']);
+    });
+  });
+
+  it('lists the values of a facet, and gives none when this Tunarr has no such facet', async () => {
+    const { c } = client({ 'POST /api/programs/facets/audioLanguages': { facetValues: { fra: 3, eng: 90 } } });
+    expect((await c.facetValues('audioLanguages')).sort()).toEqual(['eng', 'fra']);
+    expect(await c.facetValues('nothing')).toEqual([]);
   });
 
   it('fails loudly when a search returns fewer results than Tunarr reports', async () => {

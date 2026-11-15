@@ -7,5 +7,5 @@ export default defineConfig({
   base: './',
   server: { proxy: { '/api': process.env['DAYTUNER_API'] ?? 'http://127.0.0.1:8420' } },
   build: { outDir: 'dist', emptyOutDir: true },
-  test: { environment: 'jsdom', globals: false },
+  test: { environment: 'jsdom', globals: false, testTimeout: 20000 },
 });

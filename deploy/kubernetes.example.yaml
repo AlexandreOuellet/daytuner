@@ -1,6 +1,7 @@
 # An example for Kubernetes: one DayTuner, a volume for its database, and a service. Change the image, TUNARR_URL and the
-# storage class. DayTuner has NO login: put it behind your own authentication (an ingress with forward auth or basic auth)
-# before anyone but you can reach it. By default it cannot write to Tunarr; set DAYTUNER_ALLOW_WRITES to "1" to let it
+# storage class. There is no ingress here on purpose: how DayTuner is reached belongs with the rest of your cluster's
+# configuration. DayTuner has NO login, so whatever exposes it must authenticate (forward auth or basic auth) before anyone but you
+# can reach it. By default it cannot write to Tunarr; set DAYTUNER_ALLOW_WRITES to "1" to let it
 # commit lineups and run its daily scheduler.
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -25,6 +26,7 @@ spec:
           image: your-registry/daytuner:latest
           env:
             - { name: TUNARR_URL, value: "http://tunarr:8000" }
+            - { name: TZ, value: "America/Toronto" }   # the time zone of channels created from the page
             # - { name: DAYTUNER_ALLOW_WRITES, value: "1" }
           ports: [{ name: http, containerPort: 8420 }]
           readinessProbe: { httpGet: { path: /api/health, port: http }, periodSeconds: 10 }

@@ -2,14 +2,16 @@
 // list names become clip lists. The result is exactly what the engine's plan() takes.
 // The source is anything shaped like the Tunarr client, so tests can use a fake one.
 
+import { FILL_LINK, gapsOf } from './weekplan.js';
 import type { AdPosition, Chapter, Library, Pool, Schedule, SlotDef } from '@daytuner/engine';
 import { DAY_NAMES, type PoolDef, type ScheduleFile } from './file.js';
 import { matchesFilter } from './units.js';
+import { indexLookup, RuleError, selectMovies, selectShows, type RuleMovie, type RuleShow, type RuleSource } from './rules.js';
 
-export interface LibrarySource {
-  movies(): Promise<{ id: string; title: string; duration: number; genres: string[] }[]>;
-  shows(): Promise<{ id: string; title: string }[]>;
-  episodes(showId: string): Promise<{ id: string; title: string; duration: number; season: number; episode: number }[]>;
+export interface LibrarySource extends RuleSource {
+  movies(): Promise<RuleMovie[]>;
+  shows(): Promise<RuleShow[]>;
+  episodes(showId: string): Promise<{ id: string; title: string; duration: number; season: number; episode: number; aired?: number }[]>;
   fillerLists(): Promise<{ id: string; name: string }[]>;
   fillerListClips(listId: string): Promise<{ id: string; duration: number }[]>;
   /** Chapter markers of one program. Optional: a source without it plans with the every-N-minutes offers. */
@@ -52,6 +54,8 @@ export function takeTurns<T>(lists: readonly (readonly T[])[]): T[] {
 
 export interface ResolvedPool {
   ids: string[];
+  /** The shows of a pool of shows, in turn order, with how many episodes each gives. */
+  members?: { id: string; title: string; episodes: number }[];
   order: Pool['order'];
   programs: Record<string, { duration: number }>;
   titles: Record<string, string>;
@@ -61,61 +65,118 @@ export interface ResolvedPool {
  * Turns a pool definition (shows, or a movie filter) into the programs it holds, with their lengths and readable names.
  * One resolver keeps the show and movie lists it reads, so resolving several pools reads each list once.
  */
-export function makeLibraryReader(source: Pick<LibrarySource, 'movies' | 'shows' | 'episodes'>, notes: string[] = []): {
+/** How many shows' episode lists are read at once. */
+const EPISODE_READS = 6;
+
+type Episode = Awaited<ReturnType<LibrarySource['episodes']>>[number];
+
+/** The episodes a pool plays: the seasons asked for, without specials when told, no shorter or longer than asked, in the order asked. */
+function applyEpisodeRules(eps: Episode[], rules: PoolDef['episodes']): Episode[] {
+  if (!rules) return eps;
+  let out = eps.filter((e) =>
+    (rules.seasons === undefined || (e.season >= rules.seasons.from && e.season <= rules.seasons.to))
+    && (rules.specials !== 'skip' || e.season !== 0)
+    && (rules.duration === undefined || matchesFilter(e.duration, rules.duration)));
+  if (rules.order === 'airdate') {
+    out = [...out].sort((a, b) => (a.aired ?? Infinity) - (b.aired ?? Infinity) || a.season - b.season || a.episode - b.episode);
+  }
+  return out;
+}
+
+export function makeLibraryReader(source: Pick<LibrarySource, 'movies' | 'shows' | 'episodes' | 'idsWhere'>, notes: string[] = []): {
   pool: (def: PoolDef) => Promise<ResolvedPool>;
   episodesOfShow: (title: string, id?: string) => ReturnType<LibrarySource['episodes']>;
   movies: () => ReturnType<LibrarySource['movies']>;
 } {
   let showList: Awaited<ReturnType<LibrarySource['shows']>> | undefined;
   let movieList: Awaited<ReturnType<LibrarySource['movies']>> | undefined;
-  const episodesOfShow = async (title: string, id?: string) => {
+  const resolveShow = async (title: string, id?: string): Promise<RuleShow> => {
     showList ??= await source.shows();
     if (id !== undefined) {
       const found = showList.find((s) => s.id === id);
       if (!found) throw new ResolveError(`there is no show with id "${id}" (labelled "${title}")`);
       if (!same(found.title, title)) notes.push(`the show with id "${id}" is now titled "${found.title}", the file labels it "${title}"`);
-      return source.episodes(found.id);
+      return found;
     }
     const matches = showList.filter((s) => same(s.title, title));
     if (matches.length === 0) throw new ResolveError(`there is no show named "${title}"`);
     if (matches.length > 1) {
       throw new ResolveError(`there is more than one show named "${title}"; add an id: ${matches.map((m) => m.id).join(', ')}`);
     }
-    return source.episodes(matches[0]!.id);
+    return matches[0]!;
   };
+  const episodesOfShow = async (title: string, id?: string) => source.episodes((await resolveShow(title, id)).id);
   const movies = async () => (movieList ??= await source.movies());
+  const look = indexLookup(source);
+  const showsList = async () => (showList ??= await source.shows());
   const pool = async (def: PoolDef): Promise<ResolvedPool> => {
     const programs: ResolvedPool['programs'] = {};
     const titles: ResolvedPool['titles'] = {};
     let ids: string[];
     let order: Pool['order'];
-    if (def.shows) {
-      const perShow: string[][] = [];
-      for (const ref of def.shows) {
-        const { title, id } = typeof ref === 'string' ? { title: ref, id: undefined } : { title: ref.show, id: ref.id };
-        const eps = await episodesOfShow(title, id);
-        for (const e of eps) {
-          programs[e.id] = { duration: e.duration };
-          titles[e.id] = `${title} S${e.season}E${e.episode} "${e.title}"`;
+    let members: ResolvedPool['members'];
+    try {
+      if (def.shows) {
+        // Shows named by hand come first and win over a rule that finds the same show; each show appears once.
+        const all = await showsList();
+        const entries: { id: string; title: string; named: boolean; entry: number }[] = [];
+        const named = new Set<string>();
+        const foundNamed = new Map<number, RuleShow>();
+        for (const [i, ref] of def.shows.entries()) {
+          if (typeof ref !== 'string' && 'match' in ref) continue;
+          const { title, id } = typeof ref === 'string' ? { title: ref, id: undefined } : { title: ref.show, id: ref.id };
+          const found = await resolveShow(title, id);
+          foundNamed.set(i, found);
+          named.add(found.id);
         }
-        perShow.push(eps.map((e) => e.id));
+        let n = 0;
+        for (const [i, ref] of def.shows.entries()) {
+          if (typeof ref === 'string' || !('match' in ref)) {
+            const title = typeof ref === 'string' ? ref : ref.show;
+            const found = foundNamed.get(i)!;
+            if (!entries.some((e) => e.id === found.id)) entries.push({ id: found.id, title, named: true, entry: n });
+          } else {
+            const hit = await selectShows(all, ref.match, ref.except ?? [], source, look);
+            for (const sh of hit.sort((x, y) => x.title.localeCompare(y.title))) {
+              if (!named.has(sh.id) && !entries.some((e) => e.id === sh.id)) entries.push({ id: sh.id, title: sh.title, named: false, entry: n });
+            }
+          }
+          n++;
+        }
+        const perShow: string[][] = [];
+        members = [];
+        // The episodes of the shows are read a few at a time.
+        const read: Episode[][] = new Array(entries.length);
+        let next = 0;
+        await Promise.all(Array.from({ length: Math.min(EPISODE_READS, entries.length) }, async () => {
+          while (next < entries.length) { const i = next++; read[i] = await source.episodes(entries[i]!.id); }
+        }));
+        for (const [i, sh] of entries.entries()) {
+          const eps = applyEpisodeRules(read[i]!, def.episodes);
+          for (const e of eps) {
+            programs[e.id] = { duration: e.duration };
+            titles[e.id] = `${sh.title} S${e.season}E${e.episode} "${e.title}"`;
+          }
+          if (eps.length === 0) continue;
+          perShow.push(eps.map((e) => e.id));
+          members.push({ id: sh.id, title: sh.title, episodes: eps.length });
+        }
+        ids = takeTurns(perShow);
+        order = def.order === 'shuffle' ? 'shuffled' : 'ordered';
+      } else {
+        const chosen = await selectMovies(await movies(), def.movies!, source, look);
+        for (const x of chosen) {
+          programs[x.id] = { duration: x.duration };
+          titles[x.id] = x.title;
+        }
+        ids = chosen.map((x) => x.id);
+        order = def.order === 'sequential' ? 'ordered' : 'shuffled';
       }
-      ids = takeTurns(perShow);
-      order = def.order === 'shuffle' ? 'shuffled' : 'ordered';
-    } else {
-      const m = def.movies!;
-      const all = await movies();
-      const chosen = all.filter(
-        (x) => (m.genre === undefined || x.genres.some((g) => same(g, m.genre!))) && (m.duration === undefined || matchesFilter(x.duration, m.duration)),
-      );
-      for (const x of chosen) {
-        programs[x.id] = { duration: x.duration };
-        titles[x.id] = x.title;
-      }
-      ids = chosen.map((x) => x.id);
-      order = def.order === 'sequential' ? 'ordered' : 'shuffled';
+    } catch (e) {
+      if (e instanceof RuleError) throw new ResolveError(e.message);
+      throw e;
     }
-    return { ids, order, programs, titles };
+    return { ids, order, programs, titles, ...(members ? { members } : {}) };
   };
   return { pool, episodesOfShow, movies };
 }
@@ -213,6 +274,11 @@ export async function resolveSchedule(file: ScheduleFile, source: LibrarySource)
       });
     }
   });
+  // Time no slot covers is played from the fill pool: one more start-only slot per gap, all sharing one place in it.
+  const spans = DAY_NAMES.flatMap((dayName, day) => (file.week[dayName] ?? []).map((s) => ({ day, at: s.at, ...(s.length !== undefined ? { length: s.length } : {}) })));
+  for (const g of gapsOf(spans)) {
+    week.push({ day: g.day, at: g.at, pool: file.fill!, link: { name: FILL_LINK, mode: 'continue' } });
+  }
 
   const position = (p: { list?: string | undefined; length: { min: number; max: number } } | undefined): AdPosition | undefined =>
     p && p.list && p.length.max > 0 ? { list: p.list, range: p.length } : undefined;
@@ -256,7 +322,7 @@ export async function resolveSchedule(file: ScheduleFile, source: LibrarySource)
  * case and quote style. More than one match, or none, is an error that says what was found.
  */
 export async function findProgram(
-  source: Pick<LibrarySource, 'movies' | 'shows' | 'episodes'>,
+  source: Pick<LibrarySource, 'movies' | 'shows' | 'episodes' | 'idsWhere'>,
   spec: string,
 ): Promise<{ id: string; title: string; duration: number }> {
   const movie = /^movie:(.+)$/s.exec(spec.trim());

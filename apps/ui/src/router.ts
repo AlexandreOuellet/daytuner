@@ -1,9 +1,12 @@
 // A tiny hash router: "#/" is the dashboard, "#/channel/NAME" a channel. No library for two pages.
 import { useEffect, useState } from 'react';
 
-export type Route = { page: 'dashboard' } | { page: 'channel'; name: string } | { page: 'cursors'; name: string } | { page: 'ads'; name: string } | { page: 'schedule'; name: string } | { page: 'special'; name: string } | { page: 'staging'; name: string; date?: string };
+export type Route = { page: 'dashboard' } | { page: 'add' } | { page: 'channel'; name: string } | { page: 'cursors'; name: string } | { page: 'ads'; name: string } | { page: 'schedule'; name: string } | { page: 'special'; name: string } | { page: 'staging'; name: string; date?: string } | { page: 'calendar'; name: string; date?: string };
 
 export function parseRoute(hash: string): Route {
+  if (hash === '#/add') return { page: 'add' };
+  const ca = /^#\/channel\/(.+)\/calendar(?:\/(\d{4}-\d{2}-\d{2}))?$/.exec(hash);
+  if (ca) return { page: 'calendar', name: decodeURIComponent(ca[1]!), ...(ca[2] ? { date: ca[2] } : {}) };
   const st = /^#\/channel\/(.+)\/staging(?:\/(\d{4}-\d{2}-\d{2}))?$/.exec(hash);
   if (st) return { page: 'staging', name: decodeURIComponent(st[1]!), ...(st[2] ? { date: st[2] } : {}) };
   const sp = /^#\/channel\/(.+)\/special-days$/.exec(hash);
@@ -18,8 +21,10 @@ export function parseRoute(hash: string): Route {
   return m ? { page: 'channel', name: decodeURIComponent(m[1]!) } : { page: 'dashboard' };
 }
 
+export const addLink = '#/add';
 export const channelLink = (name: string): string => `#/channel/${encodeURIComponent(name)}`;
 export const stagingLink = (name: string, date?: string): string => `#/channel/${encodeURIComponent(name)}/staging${date ? `/${date}` : ''}`;
+export const calendarLink = (name: string, date?: string): string => `#/channel/${encodeURIComponent(name)}/calendar${date ? `/${date}` : ''}`;
 export const specialLink = (name: string): string => `#/channel/${encodeURIComponent(name)}/special-days`;
 export const scheduleLink = (name: string): string => `#/channel/${encodeURIComponent(name)}/schedule`;
 export const adsLink = (name: string): string => `#/channel/${encodeURIComponent(name)}/ads`;

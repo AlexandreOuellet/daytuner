@@ -47,6 +47,15 @@ copy, on top of a lineup whose end carried a fraction of a millisecond. Checked 
 - An existing lineup whose end is fractional is handled by one flex (rounded to whole milliseconds)
   up to the next grid line. After it, everything written is whole milliseconds.
 
+## The end of a lineup drifts by fractions of a millisecond
+
+Seen on the hidden channel of the real server after 3 commits (about 22 days, 6,869 items): Tunarr reads filler clips back with
+their real lengths (`29976.961`), not the whole milliseconds that were written, so the channel's `duration` ended 139 ms short of
+the end DayTuner recorded. A worker that insists on an exact match stops for good. It now carries on when the drift is under a
+second and the next grid line is the same one, says so in the run's notes (`edge-drift`), and brings the next slot back to the
+grid with a flex. A bigger drift, or one that crosses a grid line, is still treated as a change made outside DayTuner.
+Not known: whether playback follows the stored or the real lengths between the commits (the guide stays within the drift).
+
 ## Guide and playback checks (test copy)
 
 - **XMLTV** (`POST /api/xmltv/refresh`, then `GET /api/xmltv.xml`): verified. All 19 programmes
@@ -71,7 +80,7 @@ copy, on top of a lineup whose end carried a fraction of a millisecond. Checked 
 ### Observed playback of a DayTuner-written lineup
 
 On a throwaway channel in the test copy (created with `POST /api/channels`, body
-`{"type": "new", "channel": {...}}` with a client-supplied `id`, `duration: 0` and a `startTime` on the
+`{"type": "new", "channel": {...}}` with `duration: 0` (Tunarr ignores a client-supplied `id` and returns its own) and a `startTime` on the
 grid in the past; deleted afterwards), a 4-hour plan was appended from the channel's very first
 moment. While the wall clock ran through it, 15 samples asked the pod to stream and read its real
 ffmpeg command line:
@@ -167,3 +176,10 @@ its first block, and a 2.5-hour slot with a pinned movie was added inside a day.
 
 Staging one day takes about two minutes when the library has to be read again (chapters of every program in the pools),
 so each edit command was slow on a large library. Chapters are now cached in the store (see `status.md`): the same command took 50 s the first time and 7 s after.
+
+## Creating a channel (used by "Add a channel")
+
+`POST /api/channels` with `{"type": "new", "channel": {...}}` creates an empty channel. Needed fields: name, number, `startTime`,
+`duration` 0, `stealth`, `groupTitle`, `guideMinimumDuration`, `disableFillerOverlay`, `subtitlesEnabled`, `icon`, `offline`,
+`streamMode` and `transcodeConfigId` (the default one from `GET /api/transcode_configs`). The answer carries the channel's real id.
+A number in use is refused by Tunarr. Checked on the test copy.

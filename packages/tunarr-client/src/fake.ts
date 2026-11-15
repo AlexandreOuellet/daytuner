@@ -35,6 +35,14 @@ export class FakeTunarr {
     this.lineup.push(...items);
   }
 
+  /** Channels created through POST /api/channels, as sent. */
+  readonly created: Record<string, unknown>[] = [];
+  private readonly createdLineups = new Map<string, Record<string, unknown>[]>();
+  /** The lineup of the first channel that was created through the fake. */
+  get createdLineup(): Record<string, unknown>[] {
+    return this.createdLineups.get(String(this.created[0]?.['id'])) ?? [];
+  }
+
   readonly fetch: FetchLike = async (url, init) => {
     const path = url.replace(/^https?:\/\/[^/]+/, '');
     const method = init?.method ?? 'GET';
@@ -44,7 +52,27 @@ export class FakeTunarr {
     const d = this.data;
     const ch = d.channel;
 
-    if (method === 'GET' && path === '/api/channels') return json([this.channelJson()]);
+    if (method === 'GET' && path === '/api/transcode_configs') return json([{ id: 'tc-default', name: 'Default', isDefault: true }]);
+    if (method === 'POST' && path === '/api/channels') {
+      const made = body?.['channel'] as Record<string, unknown> | undefined;
+      if (!body || body['type'] !== 'new' || !made) return json({ error: 'the fake only creates channels with type "new"' }, 400);
+      if (this.created.some((c) => c['number'] === made['number']) || made['number'] === ch.number) return json({ error: 'channel number in use' }, 400);
+      const stored = { ...made, id: `created-${this.created.length + 1}` }; // as Tunarr does, ignore the id sent
+      this.created.push(stored);
+      this.createdLineups.set(String(stored.id), []);
+      return json(stored);
+    }
+    const lengthOf = (id: unknown): number => (this.createdLineups.get(String(id)) ?? []).reduce((a, i) => a + Number(i['duration']), 0);
+    const made = this.created.find((c) => path === `/api/channels/${String(c['id'])}`);
+    if (method === 'GET' && made) return json({ ...made, duration: lengthOf(made['id']) });
+    const madeLineup = this.created.find((c) => path === `/api/channels/${String(c['id'])}/programming`);
+    if (madeLineup && method === 'GET') return json({ lineup: this.createdLineups.get(String(madeLineup['id'])) ?? [] });
+    if (madeLineup && method === 'POST') {
+      if (!body || body['type'] !== 'manual' || body['append'] !== true) return json({ error: 'only appending manual lineups is allowed in the fake' }, 400);
+      this.createdLineups.get(String(madeLineup['id']))!.push(...(body['lineup'] as Record<string, unknown>[]));
+      return json(null);
+    }
+    if (method === 'GET' && path === '/api/channels') return json([this.channelJson(), ...this.created.map((c) => ({ ...c, duration: lengthOf(c['id']) }))]);
     if (method === 'GET' && path === `/api/channels/${ch.id}`) return json(this.channelJson());
     if (method === 'GET' && path === `/api/channels/${ch.id}/programming`) return json({ lineup: this.lineup });
     if (method === 'POST' && path === `/api/channels/${ch.id}/programming`) {

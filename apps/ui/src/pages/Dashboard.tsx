@@ -38,10 +38,10 @@ export function Dashboard() {
     <section>
       <div className="page-head">
         <h1>Channels</h1>
-        <button type="button" onClick={reload} disabled={loading}>{loading ? 'Loading…' : 'Refresh'}</button>
+        <span><a className="button" href="#/add">Add a channel</a>{' '}<button type="button" onClick={reload} disabled={loading}>{loading ? 'Loading…' : 'Refresh'}</button></span>
       </div>
       {error && <p className="error" role="alert">{error}</p>}
-      {data && data.length === 0 && <p className="muted">No channels yet. Add one with <code>daytuner channel add</code>.</p>}
+      {data && data.length === 0 && <p className="muted">No channels yet. <a href="#/add">Add a channel</a>: create one in Tunarr, or attach one that exists.</p>}
       <div className="cards">{data?.map((c) => <CardView key={c.name} card={c} />)}</div>
     </section>
   );

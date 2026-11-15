@@ -4,7 +4,7 @@
 import { BlockDoesNotFit, buildBlock, type Block, type BlockAds, type BlockHead, type BlockInput, type BlockTail } from './block.js';
 import { fillWithClips, pickClip, type Clip } from './clips.js';
 import { dayOfWeek, startOfLocalDay, startOfNextLocalDay, toEpoch, toLocal, assertZone } from './clock.js';
-import { emptyBag, markDrawn, orderedPick, pickFromBag, type BagState, type SequenceState } from './pools.js';
+import { advanceSequence, emptyBag, markDrawn, orderedPick, pickFromBag, placeInList, type BagState, type SequenceState } from './pools.js';
 import type { RngState } from './rng.js';
 import type {
   ExceptionDef, Item, ItemPosition, LockConflict, Library, PlanInput, PlanResult, PlanWarning, PlanWarningCode, PlannedSlot, Pool,
@@ -168,9 +168,8 @@ function applyLockedEffect(ctx: Ctx, work: Work, w: Window, held: PlannedSlot): 
     for (const id of held.programs) work.bags[poolKey(w.slot.pool)] = markDrawn(work.bags[poolKey(w.slot.pool)] ?? emptyBag(), id);
   } else if (w.slot.link?.mode !== 'rerun' && pool.programs.length > 0) {
     const key = sequenceKey(w.slot);
-    const seq = work.sequences[key] ?? { position: 0, history: 0 };
-    const n = held.programs.length;
-    work.sequences[key] = { position: (seq.position + n) % pool.programs.length, history: seq.history + n };
+    const seq = currentPlace(work, key, pool.programs, w, false);
+    work.sequences[key] = advanceSequence(seq, pool.programs, held.programs.length);
   }
   for (const it of held.items) {
     if (it.kind === 'filler') work.bags[bagKey(it.list)] = markDrawn(work.bags[bagKey(it.list)] ?? emptyBag(), it.clipId);
@@ -204,7 +203,6 @@ function validate(schedule: Schedule, library: Library): void {
     for (const id of p.programs) if (!(id in library.programs)) throw new RangeError(`unknown program: ${id}`);
   }
   for (const e of schedule.exceptions) if (!(e.programId in library.programs)) throw new RangeError(`unknown program: ${e.programId}`);
-  if (schedule.week.length === 0) throw new RangeError('the schedule has no slots');
 }
 
 function blockAdsOf(schedule: Schedule): BlockAds {
@@ -382,7 +380,7 @@ function planNormally(ctx: Ctx, work: Work, w: Window, pool: Pool): { placed: Pl
   }
 
   const key = sequenceKey(slot);
-  const seq = work.sequences[key] ?? { position: 0, history: 0 };
+  const seq = currentPlace(work, key, pool.programs, w, true);
   const length = pool.programs.length;
 
   if (slot.link?.mode === 'rerun') {
@@ -420,9 +418,28 @@ function planNormally(ctx: Ctx, work: Work, w: Window, pool: Pool): { placed: Pl
   for (let i = 0; i < Math.min(length, 200); i++) ids.push(orderedPick(pool.programs, seq.position, i)!.id);
   const r = placeBlocks(ctx, work, w, { kind: 'list', ids, explicit: false });
   const taken = r.placed.filter((p) => !p.pinned).length;
-  work.sequences[key] = { position: (seq.position + taken) % length, history: seq.history + taken };
+  work.sequences[key] = advanceSequence(seq, pool.programs, taken);
   reportStop(work, w, r, 'ordered');
   return { placed: r.placed, edges: r.edges, explicit: false };
+}
+
+/**
+ * A sequence's place for the list as it is now. The list changes (episodes arrive or go), so the place is found again after the
+ * last episode taken; the first time that moves it, or the last episode is gone, the plan says so.
+ */
+function currentPlace(work: Work, key: string, list: readonly string[], w: Window, say: boolean): SequenceState {
+  const stored = work.sequences[key] ?? { position: 0, history: 0 };
+  const { seq, note } = placeInList(stored, list);
+  if (note) {
+    if (say) {
+      warn(work, note.kind === 'moved' ? 'place-moved' : 'place-lost', note.kind === 'moved' ? 'info' : 'warning', w.start, w.slotId,
+        note.kind === 'moved'
+          ? `the list of ${w.slot.pool} changed since the last episode aired, so the next episode is now number ${note.to + 1} (it was ${note.from + 1}). An episode that arrived behind the place is skipped; rewind to play it`
+          : `${stored.last} is no longer in ${w.slot.pool}, so the place is kept as number ${note.from + 1}; check that the next episode is the right one`);
+    }
+    work.sequences[key] = seq;
+  }
+  return seq;
 }
 
 function countExceptionPick(ctx: Ctx, work: Work, w: Window, pool: Pool): void {
@@ -445,9 +462,15 @@ interface PlaceResult {
   /** The program that did not fit (ordered shows), for the warning. */
   unfit: string | undefined;
   skipped: number;
+  /** Programs shown again because nothing left in the pool's round fit. */
+  repeats: string[];
 }
 
 function reportStop(work: Work, w: Window, r: PlaceResult, kind: 'ordered' | 'shuffled'): void {
+  for (const id of r.repeats) {
+    warn(work, 'repeat-pick', 'info', w.start, w.slotId,
+      `${id} was shown again: nothing left in the pool's round fit the remaining time`);
+  }
   if (r.skipped > 0) {
     warn(work, 'programs-skipped-for-fit', 'info', w.start, w.slotId,
       `${r.skipped} program(s) did not fit this slot's remaining time and were passed over`);
@@ -492,6 +515,7 @@ function placeBlocks(ctx: Ctx, work: Work, w: Window, source: Source): PlaceResu
   let stop: PlaceResult['stop'] = 'full';
   let unfit: string | undefined;
   let skipped = 0;
+  const repeats: string[] = [];
   let lastOnly = false;
   let pulled = 0; // blocks taken from the source, which pinned blocks are not
   const usedPins = new Set<number>();
@@ -558,6 +582,7 @@ function placeBlocks(ctx: Ctx, work: Work, w: Window, source: Source): PlaceResu
         trial.rng = r.rng;
         if (r.pick === undefined) { stop = 'nofit'; work.warnings = trial.warnings; break; }
         skipped += r.skipped;
+        if (r.repeat) repeats.push(r.pick!);
         trial.bags[source.key] = r.bag;
         chosen = r.pick;
       }
@@ -592,7 +617,7 @@ function placeBlocks(ctx: Ctx, work: Work, w: Window, source: Source): PlaceResu
     last.input = input;
     last.block = buildBlock(input);
   }
-  return { placed, edges, stop, unfit, skipped };
+  return { placed, edges, stop, unfit, skipped, repeats };
 }
 
 // ---------------------------------------------------------------------------------------------

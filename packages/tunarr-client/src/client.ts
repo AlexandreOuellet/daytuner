@@ -53,12 +53,25 @@ export interface MovieInfo {
   duration: number;
   genres: string[];
   year: number | null;
+  rating: string | null;
+  studios: string[];
+  tags: string[];
+  actors: string[];
+  directors: string[];
 }
 
 export interface ShowInfo {
   id: string;
   title: string;
+  year: number | null;
+  rating: string | null;
+  studios: string[];
+  tags: string[];
+  actors: string[];
 }
+
+/** What a rule asks the index for: ids of movies or shows with a genre on the show, or an audio or subtitle language. */
+export type IdsField = 'genre' | 'audio' | 'subtitles';
 
 export interface EpisodeInfo {
   id: string;
@@ -66,9 +79,20 @@ export interface EpisodeInfo {
   duration: number;
   season: number;
   episode: number;
+  /** When it first aired (ms), when known. */
+  aired?: number;
 }
 
 type Json = Record<string, unknown>;
+
+/** How many pages of one search are asked for at once. */
+const SEARCH_PARALLEL = 4;
+/** Tunarr's index returns at most this many values of a facet; a facet with that many may have been cut short. */
+const FACET_LIMIT = 100;
+
+/** The names in a list of {name} objects (genres, studios, actors), or none. */
+const names = (v: unknown): string[] => (Array.isArray(v) ? v.flatMap((x) => (typeof x === 'object' && x !== null && typeof (x as Json)['name'] === 'string' ? [(x as Json)['name'] as string] : [])) : []);
+const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
 
 const rec = (v: unknown, what: string): Json => {
   if (typeof v !== 'object' || v === null || Array.isArray(v)) throw new TypeError(`expected an object for ${what}`);
@@ -113,8 +137,44 @@ export class TunarrClient {
     return this.request('GET', path);
   }
 
+  /** The values of a field the index keeps as facets (it returns at most 100). Empty when this Tunarr has no such facet. */
+  async facetValues(field: string): Promise<string[]> {
+    try {
+      const d = rec(await this.post(`/api/programs/facets/${field}`, {}), 'facet');
+      return Object.keys(rec(d['facetValues'], 'facetValues'));
+    } catch {
+      return [];
+    }
+  }
+
   post(path: string, body: unknown): Promise<unknown> {
     return this.request('POST', path, body);
+  }
+
+  /** The id of Tunarr's default transcode configuration (a new channel needs one). */
+  async defaultTranscodeConfigId(): Promise<string> {
+    const all = arr(await this.get('/api/transcode_configs'), 'transcode configs').map((c) => rec(c, 'transcode config'));
+    const pick = all.find((c) => c['isDefault'] === true) ?? all[0];
+    if (!pick) throw new Error('Tunarr has no transcode configuration, so a channel cannot be created');
+    return str(pick['id'], 'transcode config id');
+  }
+
+  /**
+   * Creates an empty channel (no programs, duration 0) starting at `startTime`, which the caller puts on its grid. This is the one
+   * thing besides appending that this client writes. The start time is set here and never changed afterwards.
+   */
+  async createChannel(o: { name: string; number: number; startTime: number; stealth: boolean }): Promise<ChannelInfo> {
+    if (!this.allowWrites) throw new Error('this client was not created with allowWrites, so it cannot write');
+    const channel = {
+      id: globalThis.crypto.randomUUID(), name: o.name, number: o.number, startTime: o.startTime, duration: 0, stealth: o.stealth,
+      groupTitle: 'tunarr', guideMinimumDuration: 30_000, disableFillerOverlay: false, subtitlesEnabled: false,
+      icon: { path: '', width: 0, duration: 0, position: 'bottom-right', useDefaultIconFallback: true },
+      offline: { picture: '', soundtrack: '', mode: 'pic' },
+      streamMode: 'hls', transcodeConfigId: await this.defaultTranscodeConfigId(),
+    };
+    // Tunarr gives the channel an id of its own, whatever id is sent: read it from the answer.
+    const made = rec(await this.post('/api/channels', { type: 'new', channel }), 'created channel');
+    return this.channel(str(made['id'], 'created channel id'));
   }
 
   /**
@@ -165,19 +225,20 @@ export class TunarrClient {
    * silent, so the number collected is checked against the total the server reports.
    */
   private async search(filter: Json, pageSize = 200): Promise<Json[]> {
-    const out: Json[] = [];
-    let totalHits: number | undefined;
-    for (let page = 0; ; page++) {
-      const d = rec(
-        await this.post('/api/programs/search', { query: { query: null, filter }, page, limit: pageSize }),
-        'search',
-      );
-      out.push(...arr(d['results'], 'results').map((r) => rec(r, 'result')));
-      totalHits = num(d['totalHits'], 'totalHits');
-      if (page + 1 >= num(d['totalPages'], 'totalPages')) break;
+    const fetchPage = async (page: number): Promise<{ results: Json[]; totalHits: number; totalPages: number }> => {
+      const d = rec(await this.post('/api/programs/search', { query: { query: null, filter }, page, limit: pageSize }), 'search');
+      return { results: arr(d['results'], 'results').map((r) => rec(r, 'result')), totalHits: num(d['totalHits'], 'totalHits'), totalPages: num(d['totalPages'], 'totalPages') };
+    };
+    const first = await fetchPage(0);
+    const pages: Json[][] = [first.results];
+    // The rest of the pages are asked for a few at a time: a large library is many pages, each slow on its own.
+    const rest = Array.from({ length: Math.max(0, first.totalPages - 1) }, (_, i) => i + 1);
+    for (let i = 0; i < rest.length; i += SEARCH_PARALLEL) {
+      pages.push(...(await Promise.all(rest.slice(i, i + SEARCH_PARALLEL).map(async (p) => (await fetchPage(p)).results))));
     }
-    if (out.length !== totalHits) {
-      throw new Error(`the search returned ${out.length} results but Tunarr reports ${totalHits}`);
+    const out = pages.flat();
+    if (out.length !== first.totalHits) {
+      throw new Error(`the search returned ${out.length} results but Tunarr reports ${first.totalHits}`);
     }
     return out;
   }
@@ -192,8 +253,13 @@ export class TunarrClient {
       id: str(r['uuid'], 'uuid'),
       title: str(r['title'], 'title'),
       duration: Math.round(num(r['duration'], 'movie duration')),
-      genres: Array.isArray(r['genres']) ? r['genres'].map((g) => str(rec(g, 'genre')['name'], 'genre name')) : [],
+      genres: names(r['genres']),
       year: typeof r['year'] === 'number' ? r['year'] : null,
+      rating: typeof r['rating'] === 'string' ? r['rating'] : null,
+      studios: names(r['studios']),
+      tags: strings(r['tags']),
+      actors: names(r['actors']),
+      directors: names(r['directors']),
     }));
   }
 
@@ -202,7 +268,70 @@ export class TunarrClient {
       type: 'value',
       fieldSpec: { key: 'type', name: 'type', type: 'string', op: '=', value: ['show'] },
     });
-    return results.map((r) => ({ id: str(r['uuid'], 'uuid'), title: str(r['title'], 'title') }));
+    return results.map((r) => ({
+      id: str(r['uuid'], 'uuid'),
+      title: str(r['title'], 'title'),
+      year: typeof r['year'] === 'number' ? r['year'] : null,
+      rating: typeof r['rating'] === 'string' ? r['rating'] : null,
+      studios: names(r['studios']),
+      tags: strings(r['tags']),
+      actors: names(r['actors']),
+    }));
+  }
+
+  /**
+   * The ids of the movies, or of the shows (those with an episode that matches), for a field that the library keeps in its
+   * search index and does not return in a result: the genres of a show, the audio languages, the subtitle languages.
+   * Language values are three-letter codes ("fra").
+   */
+  async idsWhere(kind: 'movie' | 'show', field: IdsField, values: readonly string[]): Promise<Set<string>> {
+    const key = { genre: kind === 'show' ? 'grandparent.genres' : 'genres.name', audio: 'audioLanguages', subtitles: 'subtitleLanguages' }[field];
+    const type = kind === 'movie' ? 'movie' : 'episode';
+    const filter = {
+      type: 'op', op: 'and',
+      children: [
+        { type: 'value', fieldSpec: { key: 'type', name: 'type', type: 'string', op: '=', value: [type] } },
+        { type: 'value', fieldSpec: { key, name: field, type: 'faceted_string', op: 'in', value: [...values] } },
+      ],
+    };
+    if (kind === 'show') {
+      const quick = await this.showIdsByFacet(filter);
+      if (quick) return quick;
+    }
+    const out = new Set<string>();
+    for (const r of await this.search(filter, 1000)) {
+      const id = kind === 'movie' ? r['uuid'] : r['showId'];
+      if (typeof id === 'string') out.add(id);
+    }
+    return out;
+  }
+
+  /**
+   * The shows that have an episode matching the filter, from one facet call (the titles of the matching episodes' shows) instead
+   * of paging through every matching episode. Undefined when that cannot be trusted: the facet is full (it may have been cut
+   * short), or a title is not any show's title; the caller then pages through the episodes.
+   */
+  private async showIdsByFacet(filter: Json): Promise<Set<string> | undefined> {
+    let titles: string[];
+    try {
+      const d = rec(await this.post('/api/programs/facets/grandparent.title', { filter }), 'facet');
+      titles = Object.keys(rec(d['facetValues'], 'facetValues'));
+    } catch {
+      return undefined; // a Tunarr without this facet: page through the episodes instead
+    }
+    if (titles.length >= FACET_LIMIT) return undefined;
+    const byTitle = new Map<string, string[]>();
+    for (const s of await this.shows()) byTitle.set(s.title, [...(byTitle.get(s.title) ?? []), s.id]);
+    const out = new Set<string>();
+    for (const t of titles) {
+      const ids = byTitle.get(t);
+      if (!ids) return undefined;
+      if (ids.length === 1) { out.add(ids[0]!); continue; }
+      // Two shows share the title: ask which of them have a matching episode.
+      const narrowed = { type: 'op', op: 'and', children: [filter, { type: 'value', fieldSpec: { key: 'grandparent.title', name: 'its show', type: 'faceted_string', op: '=', value: [t] } }] };
+      for (const r of await this.search(narrowed, 1000)) if (typeof r['showId'] === 'string') out.add(r['showId']);
+    }
+    return out;
   }
 
   /** All the episodes of a show, in the order a viewer would watch them: by season, then episode. */
@@ -236,6 +365,7 @@ export class TunarrClient {
         duration: Math.round(num(item['duration'], 'episode duration')),
         season: season && typeof season['index'] === 'number' ? season['index'] : 0,
         episode: typeof p['episodeNumber'] === 'number' ? p['episodeNumber'] : 0,
+        ...(typeof p['releaseDate'] === 'number' ? { aired: p['releaseDate'] } : {}),
       });
     }
     return out.sort((a, b) => a.season - b.season || a.episode - b.episode || a.title.localeCompare(b.title));
