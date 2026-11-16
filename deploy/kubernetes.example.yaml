@@ -23,7 +23,7 @@ spec:
       securityContext: { fsGroup: 1000 }
       containers:
         - name: daytuner
-          image: your-registry/daytuner:latest
+          image: ghcr.io/alexandreouellet/daytuner:1.0.0-rc.1   # pin a version; see docs/deploy.md
           env:
             - { name: TUNARR_URL, value: "http://tunarr:8000" }
             - { name: TZ, value: "America/Toronto" }   # the time zone of channels created from the page

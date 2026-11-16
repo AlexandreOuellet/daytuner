@@ -1,7 +1,17 @@
 # Deploying DayTuner
 
-One container runs the web interface, its API and the daily scheduler, with one SQLite file on a volume. Build the image first
-(see [`build.md`](build.md)), or use one built by your own pipeline.
+One container runs the web interface, its API and the daily scheduler, with one SQLite file on a volume.
+
+## The image
+
+Each version is published to GitHub's container registry for `linux/amd64` and `linux/arm64`:
+
+```
+docker pull ghcr.io/alexandreouellet/daytuner:1.0.0-rc.1
+```
+
+Tags: the exact version (`1.0.0`, `1.0.0-rc.1`), `1.0` and `1` for final releases, `latest` for the newest final release (never
+an RC), and `sha-<commit>`. Pin an exact version for anything you rely on. To build it yourself instead, see [`build.md`](build.md).
 
 DayTuner is a companion to a [Tunarr](https://github.com/chrisbenincasa/tunarr) server: it reads Tunarr's library and writes
 channel lineups to it over Tunarr's HTTP API. It needs to reach Tunarr, and nothing else needs to reach DayTuner except you.
@@ -10,7 +20,7 @@ channel lineups to it over Tunarr's HTTP API. It needs to reach Tunarr, and noth
 
 ```
 docker run -d --name daytuner -p 127.0.0.1:8420:8420 -v daytuner:/config \
-  -e TUNARR_URL=http://tunarr:8000 -e TZ=America/Toronto daytuner
+  -e TUNARR_URL=http://tunarr:8000 -e TZ=America/Toronto ghcr.io/alexandreouellet/daytuner:1.0.0-rc.1
 ```
 
 Or with Compose:
@@ -18,7 +28,7 @@ Or with Compose:
 ```yaml
 services:
   daytuner:
-    image: daytuner
+    image: ghcr.io/alexandreouellet/daytuner:1.0.0-rc.1
     restart: unless-stopped
     ports: ["127.0.0.1:8420:8420"]
     volumes: ["daytuner:/config"]
