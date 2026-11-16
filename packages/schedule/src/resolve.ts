@@ -11,9 +11,9 @@ import { indexLookup, RuleError, selectMovies, selectShows, type RuleMovie, type
 export interface LibrarySource extends RuleSource {
   movies(): Promise<RuleMovie[]>;
   shows(): Promise<RuleShow[]>;
-  episodes(showId: string): Promise<{ id: string; title: string; duration: number; season: number; episode: number; aired?: number }[]>;
+  episodes(showId: string): Promise<{ id: string; title: string; duration: number; exact?: number; season: number; episode: number; aired?: number }[]>;
   fillerLists(): Promise<{ id: string; name: string }[]>;
-  fillerListClips(listId: string): Promise<{ id: string; duration: number }[]>;
+  fillerListClips(listId: string): Promise<{ id: string; duration: number; exact?: number }[]>;
   /** Chapter markers of one program. Optional: a source without it plans with the every-N-minutes offers. */
   chapters?(programId: string, duration: number): Promise<{ start: number; end: number; type: Chapter['type'] }[]>;
 }
@@ -154,7 +154,7 @@ export function makeLibraryReader(source: Pick<LibrarySource, 'movies' | 'shows'
         for (const [i, sh] of entries.entries()) {
           const eps = applyEpisodeRules(read[i]!, def.episodes);
           for (const e of eps) {
-            programs[e.id] = { duration: e.duration };
+            programs[e.id] = { duration: e.duration, ...(e.exact !== undefined ? { exact: e.exact } : {}) };
             titles[e.id] = `${sh.title} S${e.season}E${e.episode} "${e.title}"`;
           }
           if (eps.length === 0) continue;
@@ -166,7 +166,7 @@ export function makeLibraryReader(source: Pick<LibrarySource, 'movies' | 'shows'
       } else {
         const chosen = await selectMovies(await movies(), def.movies!, source, look);
         for (const x of chosen) {
-          programs[x.id] = { duration: x.duration };
+          programs[x.id] = { duration: x.duration, ...(x.exact !== undefined ? { exact: x.exact } : {}) };
           titles[x.id] = x.title;
         }
         ids = chosen.map((x) => x.id);
@@ -200,7 +200,7 @@ export async function resolveSchedule(file: ScheduleFile, source: LibrarySource)
       throw new ResolveError(`there is no filler list named "${name}" (available: ${available.map((l) => l.name).join(', ') || 'none'})`);
     }
     fillerListIds[name] = found.id;
-    clips[name] = (await source.fillerListClips(found.id)).map((c) => ({ id: c.id, duration: c.duration }));
+    clips[name] = (await source.fillerListClips(found.id)).map((c) => ({ id: c.id, duration: c.duration, ...(c.exact !== undefined ? { exact: c.exact } : {}) }));
   }
 
   // Pools.
@@ -225,7 +225,7 @@ export async function resolveSchedule(file: ScheduleFile, source: LibrarySource)
       const eps = await episodesOfShow(e.play.show, e.play.id);
       const ep = eps.find((x) => same(x.title, (e.play as { title: string }).title));
       if (!ep) throw new ResolveError(`"${e.play.show}" has no episode titled "${e.play.title}"`);
-      programs[ep.id] = { duration: ep.duration };
+      programs[ep.id] = { duration: ep.duration, ...(ep.exact !== undefined ? { exact: ep.exact } : {}) };
       titles[ep.id] = `${e.play.show} "${ep.title}"`;
       programId = ep.id;
     } else {
@@ -234,7 +234,7 @@ export async function resolveSchedule(file: ScheduleFile, source: LibrarySource)
       const mv = e.play.id !== undefined ? movieList.find((x) => x.id === e.play.id) : movieList.find((x) => same(x.title, title));
       if (!mv) throw new ResolveError(e.play.id !== undefined ? `there is no movie with id "${e.play.id}" (labelled "${title}")` : `there is no movie titled "${title}"`);
       if (e.play.id !== undefined && !same(mv.title, title)) notes.push(`the movie with id "${e.play.id}" is now titled "${mv.title}", the file labels it "${title}"`);
-      programs[mv.id] = { duration: mv.duration };
+      programs[mv.id] = { duration: mv.duration, ...(mv.exact !== undefined ? { exact: mv.exact } : {}) };
       titles[mv.id] = mv.title;
       programId = mv.id;
     }

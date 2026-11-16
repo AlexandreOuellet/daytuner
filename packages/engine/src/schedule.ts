@@ -76,6 +76,8 @@ export interface Schedule {
 
 export interface Program {
   duration: Ms;
+  /** The length with its fraction, as Tunarr counts it. Planning ignores it; writing a lineup uses it to keep programs on the grid. */
+  exact?: number;
   chapters?: readonly Chapter[];
 }
 

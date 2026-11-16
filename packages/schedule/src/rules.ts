@@ -10,6 +10,7 @@ export interface RuleMovie {
   id: string;
   title: string;
   duration: number;
+  exact?: number;
   genres: string[];
   year?: number | null;
   rating?: string | null;

@@ -59,6 +59,18 @@ it costs a whole grid step of flex and is reported as a warning (`edge-drift`), 
 the store did not write to a grid line, is still treated as a change made outside DayTuner.
 Not known: whether playback follows the stored or the real lengths between the commits (the guide stays within the drift).
 
+**Programs are kept on the grid as Tunarr counts them.** Seen on a real channel after two commits: 90 of 92 program starts were early
+by up to 69 ms, growing through a commit, so a guide that cuts off the seconds showed :29:59 and :59:59. Right after an append
+Tunarr counts the lengths that were written, and reads the lineup back later with every clip at its real length and the last piece
+of a program up to the program's real end (the channel's `duration` and the stored items agree on this from then on). DayTuner
+therefore keeps the real lengths (`exact`, beside the whole-millisecond ones it plans with) and, before it writes, walks the items
+as Tunarr will count them (`snapToGrid`): wherever an item is planned to start on a grid line, a flex of the difference rounded up
+puts it on the line or less than a millisecond after it (never before), and when the clips run long, time is taken back from a
+flex in the same stretch. The plan is unchanged, every duration written is still whole, and the error no longer adds up. The
+lineup's end is held within a millisecond of the last line, and an end up to 3 ms past a line still counts as on it, so it costs no
+grid step. The commit records the grid line as its end; right after an append the channel reads as the written lengths add up,
+which is what the verification checks.
+
 ## Guide and playback checks (test copy)
 
 - **XMLTV** (`POST /api/xmltv/refresh`, then `GET /api/xmltv.xml`): verified. All 19 programmes
@@ -116,10 +128,8 @@ them, and plans in whole milliseconds from there.
 
 ## The test copy
 
-Never write to the Tunarr that people watch.
-Writes go to a stock Tunarr running on a copy of the data: the temporary `tunarr-stock-test` pod in
-the `tunarr-test` namespace, reached with `kubectl -n tunarr-test port-forward pod/tunarr-stock-test
-18000:8000`. Its channel "Test Channel" is the one to write to. Client tests that need a server run
+Never write to the Tunarr that people watch while developing. Writes go to a stock Tunarr running on a copy of the data (the
+verification in this document was done that way). Its channel "Test Channel" is the one to write to. Client tests that need a server run
 only when `TUNARR_URL` is set, and the integration tests in the client package only read.
 
 ## Do not do

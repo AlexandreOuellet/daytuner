@@ -8,9 +8,9 @@ each channel's lineup. **This project owns everything about deciding what plays 
 the schedule definition, the planning (grid, ads, bumpers), the preview with metrics, the commit,
 and the memory of "which episode plays next".
 
-> **Status: working, not yet released.** The planner, the command line, the store, the worker, the web interface and a container
-> image are built and tested against a copy of Tunarr. It is not published or tagged: see [`docs/status.md`](docs/status.md) for what is
-> done and what is left, and [`docs/deploy.md`](docs/deploy.md) to run it. Rules and design: [`docs/roadmap.md`](docs/roadmap.md).
+> **Status: release candidate.** The planner, the command line, the store, the worker, the web interface and a container image are
+> built and tested, and run against a real Tunarr. [`docs/status.md`](docs/status.md) says what is done and what is left.
+> DayTuner has **no login of its own**: put it behind your own authentication (see [`docs/deploy.md`](docs/deploy.md)).
 
 ## Why
 
@@ -41,6 +41,17 @@ That means the scheduling brain can live outside Tunarr and write to it. See
 
 ## Documentation
 
+**Guides**
+
+| Document | What it covers |
+|---|---|
+| [`docs/build.md`](docs/build.md) | Building from source and the container image |
+| [`docs/deploy.md`](docs/deploy.md) | Running it: Docker, Compose, Kubernetes, authentication, writing to Tunarr |
+| [`docs/configure.md`](docs/configure.md) | Settings, channels, the grid and time zone, the channel file |
+| [`docs/usage.md`](docs/usage.md) | The pages, the daily run, the command line |
+
+**Design and reference**
+
 | Document | What it covers |
 |---|---|
 | [`docs/vision.md`](docs/vision.md) | The goal, principles, non-goals, and how we will know it works |
@@ -66,7 +77,11 @@ this repository, its notice must be kept, the file marked as altered, and the or
 packages/engine         pure planning code: no network, no database
 packages/tunarr-client  typed client for the parts of Tunarr's API we use
 apps/cli                preview and apply from the command line
-apps/web                the interface (later)
+apps/ui                 the React pages
+apps/web                the HTTP server and its API
+packages/schedule       the channel file and the pool rules
+packages/store          the SQLite store
+packages/worker         the run: plan, check, append, the daily scheduler
 schedules/              example schedule in the YAML import/export format
 tools/spike             the script that verified the Tunarr API
 docs/                   the documents above

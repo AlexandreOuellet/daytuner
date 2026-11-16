@@ -26,8 +26,34 @@ export class FakeTunarr {
     this.lineup = [...(data.lineup ?? [])];
   }
 
+  /** The lineup's length as Tunarr counts it once it reads the items back: clips at their real lengths. */
   get duration(): number {
-    return this.lineup.reduce((a: number, i) => a + Number(i['duration']), 0);
+    return this.lineup.reduce((a: number, i) => a + Number(this.real(i)['duration']), 0);
+  }
+
+  /** True from an append until the channel is read once: Tunarr then still counts the lengths that were written. */
+  private justWritten = false;
+  /** The index of the first item appended since the channel was last read. */
+  private freshFrom = 0;
+
+  /**
+   * An item as Tunarr reads it back later: a clip at its real length (the fake's clips are .25 ms longer than the whole
+   * milliseconds they are listed with), and the last piece of a program up to the program's real end (episodes .3, movies .4).
+   */
+  real(i: Record<string, unknown>): Record<string, unknown> {
+    const d = this.data;
+    if (i['corrupted']) return i;
+    if (i['type'] === 'filler') {
+      const c = d.fillerLists.flatMap((l) => l.clips).find((x) => x.id === i['id']);
+      return c ? { ...i, duration: c.duration + 0.25 } : i;
+    }
+    if (i['type'] === 'content') {
+      const p = d.movies.find((m) => m.id === i['id']) ?? d.shows.flatMap((s) => s.episodes).find((e) => e.id === i['id']);
+      const off = Number(i['startOffsetMs'] ?? 0);
+      const extra = d.movies.some((m) => m.id === i['id']) ? 0.4 : 0.3;
+      if (p && off + Number(i['duration']) === p.duration) return { ...i, duration: p.duration + extra - off };
+    }
+    return i;
   }
 
   /** Something outside DayTuner adds to the lineup (for example a save from Tunarr's own interface). */
@@ -74,17 +100,22 @@ export class FakeTunarr {
     }
     if (method === 'GET' && path === '/api/channels') return json([this.channelJson(), ...this.created.map((c) => ({ ...c, duration: lengthOf(c['id']) }))]);
     if (method === 'GET' && path === `/api/channels/${ch.id}`) return json(this.channelJson());
-    if (method === 'GET' && path === `/api/channels/${ch.id}/programming`) return json({ lineup: this.lineup });
+    if (method === 'GET' && path === `/api/channels/${ch.id}/programming`) return json({ lineup: this.justWritten ? this.lineup : this.lineup.map((i) => this.real(i)) });
     if (method === 'POST' && path === `/api/channels/${ch.id}/programming`) {
       if (!body || body['type'] !== 'manual' || body['append'] !== true) return json({ error: 'only appending manual lineups is allowed in the fake' }, 400);
       const items = body['lineup'] as Record<string, unknown>[];
       for (const i of items) if (!Number.isInteger(i['duration'])) return json({ error: `duration ${String(i['duration'])} is not whole` }, 400);
       if (this.dropNextAppend) { this.dropNextAppend = false; return json({ error: 'connection dropped' }, 500); }
-      if (this.corruptNextAppend && items.length >= 2) {
+      const k = items.findIndex((x, n) => n + 1 < items.length && x['duration'] !== items[n + 1]!['duration']);
+      if (this.corruptNextAppend && k >= 0) {
         this.corruptNextAppend = false;
-        const [a, b, ...more] = items as [Record<string, unknown>, Record<string, unknown>, ...Record<string, unknown>[]];
-        this.lineup.push({ ...a, duration: b['duration'] }, { ...b, duration: a['duration'] }, ...more);
+        const swapped = [...items];
+        swapped[k] = { ...items[k]!, duration: items[k + 1]!['duration'], corrupted: true };
+        swapped[k + 1] = { ...items[k + 1]!, duration: items[k]!['duration'], corrupted: true };
+        this.lineup.push(...swapped);
       } else this.lineup.push(...items);
+      if (!this.justWritten) this.freshFrom = this.lineup.length - items.length;
+      this.justWritten = true;
       if (this.crashAfterNextAppend) { this.crashAfterNextAppend = false; return json({ error: 'connection dropped after storing' }, 500); }
       return json(null);
     }
@@ -125,6 +156,9 @@ export class FakeTunarr {
 
   private channelJson(): Record<string, unknown> {
     const ch = this.data.channel;
-    return { id: ch.id, number: ch.number, name: ch.name, startTime: ch.startTime, duration: this.duration };
+    // Right after an append the length is what was there plus the lengths written; it reads back at real lengths from then on.
+    const duration = this.lineup.reduce((a: number, i, n) => a + Number(this.justWritten && n >= this.freshFrom ? i['duration'] : this.real(i)['duration']), 0);
+    this.justWritten = false;
+    return { id: ch.id, number: ch.number, name: ch.name, startTime: ch.startTime, duration };
   }
 }

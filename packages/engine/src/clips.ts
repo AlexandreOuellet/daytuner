@@ -9,6 +9,8 @@ import { assertMs, type Ms } from './time.js';
 export interface Clip {
   id: string;
   duration: Ms;
+  /** The length with its fraction, as Tunarr counts it (see Program.exact). */
+  exact?: number;
 }
 
 export interface Fill {

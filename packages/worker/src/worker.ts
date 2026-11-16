@@ -8,7 +8,7 @@ import { parseScheduleFile, resolveSchedule } from '@daytuner/schedule';
 import { cachedSource } from './chapters.js';
 import type { ChannelRecord, CommitRecord, PinRecord, StagedSlotRecord, Store } from '@daytuner/store';
 import { resolveCached } from './resolvecache.js';
-import { alignToGrid, appendVerified, toLineupItems, totalDuration, type LineupItem, type TunarrClient } from '@daytuner/tunarr-client';
+import { alignToGrid, appendVerified, snapToGrid, toLineupItems, totalDuration, type LineupItem, type TunarrClient } from '@daytuner/tunarr-client';
 
 /** Two ends closer than this are the same: Tunarr's durations carry fractions that are rounded. */
 const EDGE_TOLERANCE_MS = 1;
@@ -128,12 +128,26 @@ export interface TopUpResult {
   conflicts: LockConflict[];
 }
 
+/** An item's length as Tunarr counts it: clips at their real length, and a program's last piece up to the program's real end. */
+function realLengths(library: { programs: Record<string, { duration: number; exact?: number }>; clips: Record<string, readonly { id: string; duration: number; exact?: number }[]> }): (i: LineupItem) => number {
+  const clip = new Map<string, number>();
+  for (const list of Object.values(library.clips)) for (const c of list) if (c.exact !== undefined) clip.set(c.id, c.exact);
+  return (i) => {
+    if (i.type === 'filler') return clip.get(i.id) ?? i.duration;
+    if (i.type === 'content') {
+      const p = library.programs[i.id];
+      return p?.exact !== undefined && i.startOffsetMs + i.duration === p.duration ? p.exact - i.startOffsetMs : i.duration;
+    }
+    return i.duration;
+  };
+}
+
 const same = (a: number, b: number): boolean => Math.abs(a - b) <= EDGE_TOLERANCE_MS;
 
 /** Settles a commit that was begun but never confirmed, by looking at where Tunarr's lineup really ends. */
 function resolvePending(store: Store, pending: CommitRecord, edgeNow: number, at: number): Recovery {
-  if (same(edgeNow, pending.toEdge)) {
-    store.completeCommit(pending.id, edgeNow, at);
+  if (same(edgeNow, pending.toEdge) || same(edgeNow, pending.fromEdge + pending.totalMs)) {
+    store.completeCommit(pending.id, pending.toEdge, at);
     return 'completed';
   }
   if (same(edgeNow, pending.fromEdge)) {
@@ -236,8 +250,14 @@ export async function topUp(deps: WorkerDeps, channelName: string, opts: TopUpOp
   }
   if (result.slots.length === 0) return { action: 'none', ...base, warnings: result.warnings };
 
-  const items: LineupItem[] = [...(flex > 0 ? [{ type: 'flex' as const, duration: flex }] : []), ...toLineupItems(result.slots, fillerListIds)];
+  const planned = toLineupItems(result.slots, fillerListIds);
+  const real = realLengths(library);
+  const items: LineupItem[] = [
+    ...(flex > 0 ? [{ type: 'flex' as const, duration: flex }] : []),
+    ...snapToGrid(planned, { from, grid: schedule.grid, startReal: edgeNow + flex, real }),
+  ];
   const totalMs = totalDuration(items);
+  const planEnd = result.slots[result.slots.length - 1]!.end;
   const bad = layoutProblems(result.slots, from, schedule.grid);
   if (bad.length > 0) throw new ConsistencyError(`the plan does not lie on the grid as it should, so nothing was written: ${bad.join('; ')}`);
   if (opts.dryRun) {
@@ -248,7 +268,7 @@ export async function topUp(deps: WorkerDeps, channelName: string, opts: TopUpOp
   const commit = store.beginCommit({
     channelId: ch.id,
     fromEdge: edgeNow,
-    toEdge: edgeNow + totalMs,
+    toEdge: planEnd,
     state: result.state,
     items: items.length,
     totalMs,
@@ -274,15 +294,17 @@ export async function topUp(deps: WorkerDeps, channelName: string, opts: TopUpOp
     store.noteCommit(commit.id, `verification failed: ${what}`);
     throw new ConsistencyError(`Tunarr stored something different from what was sent (${what}). The commit stays pending; see \`channel commits ${channelName}\` and \`channel resync ${channelName}\`.`);
   }
-  // Tunarr's lineup must now end exactly where the plan does: that is where every position in it is checked from.
-  const planEnd = result.slots[result.slots.length - 1]!.end;
-  if (Math.abs(report.edgeAfter - planEnd) > EDGE_TOLERANCE_MS) {
-    const what = `the lineup now ends at ${report.edgeAfter}, but the plan ends at ${planEnd}`;
+  // Right after an append Tunarr counts the lengths that were written, so the lineup must end where they add up to. Counted at the
+  // clips' real lengths, which is how it plays them and how it reads back later, the end is the plan's (a grid line): the items
+  // were corrected for that (`snapToGrid`).
+  const written = report.edgeBefore + totalMs;
+  if (Math.abs(report.edgeAfter - written) > EDGE_TOLERANCE_MS) {
+    const what = `the lineup now ends at ${report.edgeAfter}, but the items sent add up to an end at ${written}`;
     store.noteCommit(commit.id, `verification failed: ${what}`);
     throw new ConsistencyError(`Tunarr stored the items, but not where they were planned (${what}). The commit stays pending; see \`channel commits ${channelName}\` and \`channel resync ${channelName}\`.`);
   }
   store.setPoolsSeen(ch.id, Object.fromEntries(Object.entries(schedule.pools).map(([n, p]) => [n, [...p.programs]])), clock.now());
-  store.completeCommit(commit.id, report.edgeAfter, clock.now(), {
+  store.completeCommit(commit.id, planEnd, clock.now(), {
     metrics: computeMetrics(result.slots, { grid: schedule.grid, zone: schedule.zone }),
     alerts: result.warnings.filter((w) => w.severity === 'alert').length,
     warnings: result.warnings.filter((w) => w.severity === 'warning').length,
@@ -333,9 +355,9 @@ export async function resync(deps: WorkerDeps, channelName: string, opts: { dryR
     report.found.push(`commit ${pending.id} is pending (it was to take the lineup from ${pending.fromEdge} to ${pending.toEdge})`);
     if (pending.note) {
       report.found.push(`commit ${pending.id} has a note: ${pending.note}`);
-      if (same(edgeNow, pending.toEdge)) report.stateMayBeStale = true;
+      if (same(edgeNow, pending.toEdge) || same(edgeNow, pending.fromEdge + pending.totalMs)) report.stateMayBeStale = true;
     }
-    if (same(edgeNow, pending.toEdge)) {
+    if (same(edgeNow, pending.toEdge) || same(edgeNow, pending.fromEdge + pending.totalMs)) {
       report.actions.push(
         pending.note
           ? `complete commit ${pending.id}: the lineup reaches where it should end, but what it holds differs from the plan (see the note)`

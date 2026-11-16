@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { PlannedSlot } from '@daytuner/engine';
 import { TunarrClient, type FetchLike } from './client.js';
-import { alignToGrid, toLineupItems, totalDuration } from './lineup.js';
+import { alignToGrid, snapToGrid, toLineupItems, totalDuration, type LineupItem } from './lineup.js';
 
 const slot = (items: PlannedSlot['items']): PlannedSlot => ({
   slotId: '1@0', start: 0, end: items.reduce((a, i) => a + i.duration, 0), pool: 'p', programs: ['prog'], blocks: [], exception: false, items,
@@ -95,5 +95,65 @@ describe('appending', () => {
     const { f, sent } = recorder();
     await new TunarrClient('http://t', f, true).appendLineup('c1', []);
     expect(sent).toEqual([]);
+  });
+});
+
+describe('snapToGrid', () => {
+  const G = 15 * 60_000;
+  const clip = (id: string, duration: number): LineupItem => ({ type: 'filler', id, fillerListId: 'l', fillerType: 'mid', duration });
+  const show = (duration: number): LineupItem => ({ type: 'content', id: 'p', startOffsetMs: 0, duration });
+  const flex = (duration: number): LineupItem => ({ type: 'flex', duration });
+  // Tunarr counts 'a' at 30000.4 ms and 'b' at 29999.6 ms; both were written as 30000.
+  const lengths: Record<string, number> = { a: 30000.4, b: 29999.6 };
+  const real = (i: LineupItem): number => (i.type === 'filler' ? lengths[i.id] ?? i.duration : i.duration);
+  /** The real start of the first item of each block, found by the marker clip 'first'. */
+  const blockStarts = (items: readonly LineupItem[]): number[] => {
+    let t = 0; const out: number[] = [];
+    for (const i of items) { if (i.type === 'filler' && i.id === 'first') out.push(t); t += real(i); }
+    return out;
+  };
+  const withMarker = (id: 'a' | 'b'): LineupItem => clip(id, 30000);
+  void withMarker;
+
+  it('starts every block on its grid line when the clips read shorter, block after block', () => {
+    lengths['first'] = 29999.6;
+    const block = [clip('first', 30000), show(G - 30000)];
+    const items: LineupItem[] = []; for (let n = 0; n < 50; n++) items.push(...block);
+    const out = snapToGrid(items, { from: 0, grid: G, startReal: 0, real });
+    const starts = blockStarts(out);
+    expect(starts).toHaveLength(50);
+    starts.forEach((t, n) => { expect(t - n * G).toBeGreaterThanOrEqual(-1e-6); expect(t - n * G).toBeLessThan(1); });
+    for (const i of out) expect(Number.isInteger(i.duration)).toBe(true);
+    // the whole run ends within a millisecond of its last line
+    const end = out.reduce((a, i) => a + real(i), 0);
+    expect(Math.abs(end - 50 * G)).toBeLessThan(1);
+  });
+
+  it('trims a flex when the clips read longer, so the blocks do not creep late', () => {
+    lengths['first'] = 30000.4;
+    const block = [clip('first', 30000), flex(5000), show(G - 35000)];
+    const items: LineupItem[] = []; for (let n = 0; n < 50; n++) items.push(...block);
+    const out = snapToGrid(items, { from: 0, grid: G, startReal: 0, real });
+    blockStarts(out).forEach((t, n) => { expect(t - n * G).toBeGreaterThanOrEqual(-1e-6); expect(t - n * G).toBeLessThan(1.5); });
+    expect(out.some((i) => i.type === 'flex' && i.duration < 5000)).toBe(true);
+  });
+
+  it('starts the first item on the line when the lineup it follows ended a fraction early', () => {
+    lengths['first'] = 30000;
+    const out = snapToGrid([clip('first', 30000), show(G - 30000)], { from: G, grid: G, startReal: G - 0.3, real });
+    expect(out[0]).toEqual({ type: 'flex', duration: 1 });
+  });
+
+  it('counts the last piece of a program at the program real length', () => {
+    const piece = (offset: number, duration: number): LineupItem => ({ type: 'content', id: 'p', startOffsetMs: offset, duration });
+    const r = (i: LineupItem): number => (i.type === 'content' && i.startOffsetMs === 600000 ? i.duration + 0.5 : i.duration);
+    // the last piece of the program runs half a millisecond long in Tunarr, so the next block starts a flex later... or on the line
+    const out = snapToGrid([piece(0, 600000), piece(600000, G - 600000), clip('first', 30000), show(G - 30000)], { from: 0, grid: G, startReal: 0, real: r });
+    expect(out.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it('leaves a lineup that is already exact alone', () => {
+    const items: LineupItem[] = [clip('x', 30000), show(G - 30000), show(G)];
+    expect(snapToGrid(items, { from: 0, grid: G, startReal: 0, real })).toEqual(items);
   });
 });

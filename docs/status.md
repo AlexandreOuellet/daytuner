@@ -13,9 +13,9 @@ are in [`roadmap.md`](roadmap.md); verified Tunarr facts are in [`tunarr-api.md`
 | 2 Client and CLI | done | Reads the library, appends verified lineups, `preview`. Run end to end on the test copy |
 | 3 State and worker | built, verified except ad and filler playback | SQLite store, safe top-up worker, `channel`, `run`, `cursor` commands. Run end to end on the test copy. Ad and filler playback is Tunarr's to mount (see Known gaps); the media server's guide follows Tunarr's, which the owner reports works |
 | 4 Schedules and staging | built, verified on the test copy | Design settled (architecture.md, "Phase 4 storage"). Revisions and all six slices of staging (store, `stage generate|show|clear|lock|unlock|pin|unpin`, locked slots committed as stored, lock conflicts, pins, conflicts shown by `stage show`, `stage delete|resize|add`) built), the preview diff and the revision dry-run against locked slots built; staging was run on the test copy and a locked, a pinned and an added slot were committed and read back identical (see `tunarr-api.md`) |
-| 5 Web interface | built, being tried | The dashboard, channel and add-a-channel pages, cursors, ads, the schedule designer with pool rules, the calendar (one to seven days as a time grid), and the staging editor. Tried on the test copy; not yet on a real channel |
+| 5 Web interface | built, in use | The dashboard, channel and add-a-channel pages, cursors, ads, the schedule designer with pool rules, the calendar (one to seven days as a time grid), and the staging editor. Run on a test copy and on a real channel |
 
-Tests: all pass across the engine (176), client (27), store (32), schedule (75), worker (90), web (37), UI (102) and CLI (22),
+Tests: all pass across the engine (176), client (32), store (32), schedule (75), worker (90), web (37), UI (102) and CLI (22),
 plus 3 client integration tests that run only against a real Tunarr (`TUNARR_URL`).
 
 ## Needed for 1.0
@@ -38,7 +38,7 @@ Nothing is pushed publicly until all of this is done (see the roadmap).
 - [x] YAML export (`channel export <name> [--out FILE]`: the current schedule with the library's id beside every show and movie title; import is `channel add` and `channel set-schedule`)
 
 **Phase 5: web interface**
-- [ ] The server and its architecture (`web-architecture.md`): TypeScript server plus React app, no login, one process and container. Built so far (`apps/web`): the Hono server, the read-only API, the job runner, and the write API (add channel, stage generate / lock / pin / edit / reset / check / diff, schedule check and save, rollback, cursors, run, resync, adopt-history, export), with writing to Tunarr off unless switched on. Also built: the daily scheduler (a timer in the process, only when writing is on), metrics stored per commit, targets and health, the dashboard's API. The cursor preview call is built too (`cursorPreview`). The pages are a Vite + React app (`apps/ui`): the dashboard, a channel page, the cursors page, the ads page, the schedule designer's week, pools and special days, and the staging editor are built (a card per channel with its health; checks, trends over the commits, commits and runs; a card per ordered show with a before-and-after preview), served by the same server. To build: nothing from the page designs
+- [x] The server and its architecture (`web-architecture.md`): TypeScript server plus React app, no login, one process and container. Built so far (`apps/web`): the Hono server, the read-only API, the job runner, and the write API (add channel, stage generate / lock / pin / edit / reset / check / diff, schedule check and save, rollback, cursors, run, resync, adopt-history, export), with writing to Tunarr off unless switched on. Also built: the daily scheduler (a timer in the process, only when writing is on), metrics stored per commit, targets and health, the dashboard's API. The cursor preview call is built too (`cursorPreview`). The pages are a Vite + React app (`apps/ui`): the dashboard, a channel page, the cursors page, the ads page, the schedule designer's week, pools and special days, and the staging editor are built (a card per channel with its health; checks, trends over the commits, commits and runs; a card per ordered show with a before-and-after preview), served by the same server. To build: nothing from the page designs
 - [x] Plain configuration of ads, bumpers and filler: the main complaint about Tunarr (`web-ads.md`; the ads page in `apps/ui`)
 - [x] Edit schedules, preview, see what is scheduled, link to the channel in Tunarr (`web-schedule.md`: the week grid, the Pools panel and the calendar of special days are built; the Calendar page is built: one to seven days as the same time grid as the week, with each slot's blocks inside it and a slot dragged to move or resize, one continuous list of what plays, and changes staged from it, including a rerun in place of the next episode. A month view, skipping a block and changing a break's ads are left for after 1.0)
 - [x] Add a channel from the page, creating it in Tunarr or attaching one that exists, with an empty week (`web-channels.md`; the page, the create call, and the first run of a channel that sat empty)
@@ -48,10 +48,11 @@ Nothing is pushed publicly until all of this is done (see the roadmap).
       are computed today but not stored over time)
 
 **Release**
-- [ ] A first real channel made through the page (hidden, one slot, then a saved schedule and a run) and watched
-- [ ] A code review of the whole diff, and the calendar grid looked at in a browser (drag, resize, move)
+- [x] A first real channel made through the page and run (a real Tunarr; programs found starting up to 69 ms early, fixed: see `tunarr-api.md`, "Programs are kept on the grid")
+- [x] The calendar grid looked at in a browser by the owner (it works)
+- [ ] A review of the fixes made after the first code review, and of the grid snap (`snapToGrid`), and a check on the real channel that programs now start on the line
 - [x] A verified end-to-end run on a test copy of Tunarr: staging commit, program playback and the guide
-- [x] A way to run it: a container image whose own scheduler runs the worker daily (`Dockerfile`, `docs/deploy.md`). Built with buildkit in the test cluster and deployed there (`daytuner-test` in `tunarr-test`, behind basic auth, reading the test Tunarr copy, read only)
+- [x] A way to run it: a container image whose own scheduler runs the worker daily (`Dockerfile`, `docs/deploy.md`). Build, deploy, configure and use guides: `build.md`, `deploy.md`, `configure.md`, `usage.md`
 
 ## Open decisions (the owner decides)
 
@@ -107,7 +108,7 @@ exception fallback and the mid-break offers are under Open decisions above.)
 
 In this order:
 
-1. **Try a real channel** made through the page (hidden, one slot), and fix what it shows.
-2. **Review the diff** (it is large) and look at the calendar grid in a browser.
+1. **Check the grid snap on the real channel** after its next run: every program start on its line.
+2. **Review the fixes and the snap.**
 3. **Check the metrics dashboard** against `web-dashboard.md`.
 4. **Then 1.0**: tag and push publicly (not before the owner says so).

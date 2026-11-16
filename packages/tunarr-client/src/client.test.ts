@@ -39,8 +39,8 @@ describe('reading', () => {
     });
     expect(await c.fillerLists()).toEqual([{ id: 'f1', name: 'Old Ads', count: 2 }]);
     expect(await c.fillerListClips('f1')).toEqual([
-      { id: 'c1', title: 'Ad one', duration: 30116 },
-      { id: 'c2', title: '', duration: 135732 },
+      { id: 'c1', title: 'Ad one', duration: 30116, exact: 30116.281 },
+      { id: 'c2', title: '', duration: 135732, exact: 135732.245 },
     ]);
   });
 
@@ -60,7 +60,7 @@ describe('reading', () => {
     const movies = await new TunarrClient('http://tunarr.test', f).movies();
     expect(seen).toEqual([0, 1]);
     expect(movies.map((m) => m.id)).toEqual(['m0', 'm1']);
-    expect(movies[0]).toEqual({ id: 'm0', title: 'Movie 0', duration: 5_400_000, genres: ['Comedy'], year: 1990, rating: null, studios: [], tags: [], actors: [], directors: [] });
+    expect(movies[0]).toEqual({ id: 'm0', title: 'Movie 0', duration: 5_400_000, exact: 5_400_000.4, genres: ['Comedy'], year: 1990, rating: null, studios: [], tags: [], actors: [], directors: [] });
   });
 
   it('reads rating, studios, tags, actors and directors of a movie', async () => {

@@ -39,6 +39,8 @@ export interface ClipInfo {
   title: string;
   /** Whole milliseconds. */
   duration: number;
+  /** The length as Tunarr reports it, with its fraction: Tunarr plays and counts the clip at this length. */
+  exact?: number;
 }
 
 export interface FillerListInfo {
@@ -51,6 +53,8 @@ export interface MovieInfo {
   id: string;
   title: string;
   duration: number;
+  /** The length with its fraction, as Tunarr reports it. */
+  exact?: number;
   genres: string[];
   year: number | null;
   rating: string | null;
@@ -77,6 +81,8 @@ export interface EpisodeInfo {
   id: string;
   title: string;
   duration: number;
+  /** The length with its fraction, as Tunarr reports it. */
+  exact?: number;
   season: number;
   episode: number;
   /** When it first aired (ms), when known. */
@@ -216,6 +222,7 @@ export class TunarrClient {
         id: str(o['id'], 'clip id'),
         title: typeof p['title'] === 'string' ? p['title'] : '',
         duration: Math.round(num(o['duration'], 'clip duration')),
+        exact: num(o['duration'], 'clip duration'),
       };
     });
   }
@@ -253,6 +260,7 @@ export class TunarrClient {
       id: str(r['uuid'], 'uuid'),
       title: str(r['title'], 'title'),
       duration: Math.round(num(r['duration'], 'movie duration')),
+      exact: num(r['duration'], 'movie duration'),
       genres: names(r['genres']),
       year: typeof r['year'] === 'number' ? r['year'] : null,
       rating: typeof r['rating'] === 'string' ? r['rating'] : null,
@@ -363,6 +371,7 @@ export class TunarrClient {
         id: str(item['id'], 'episode id'),
         title: str(p['title'], 'episode title'),
         duration: Math.round(num(item['duration'], 'episode duration')),
+        exact: num(item['duration'], 'episode duration'),
         season: season && typeof season['index'] === 'number' ? season['index'] : 0,
         episode: typeof p['episodeNumber'] === 'number' ? p['episodeNumber'] : 0,
         ...(typeof p['releaseDate'] === 'number' ? { aired: p['releaseDate'] } : {}),

@@ -77,7 +77,7 @@ describe('topUp', () => {
     const tun = s.fake.data.channel.startTime + s.fake.duration;
     expect(tun - NOW0).toBeGreaterThanOrEqual(8 * DAY);
     expect(tun - NOW0).toBeLessThan(8 * DAY + DAY); // overshoots by less than one window
-    expect(s.store.channel('Test')!.edge).toBe(tun);
+    expect(Math.abs(s.store.channel('Test')!.edge - tun)).toBeLessThan(1);
     expect(s.store.commits(s.store.channel('Test')!.id)[0]).toMatchObject({ status: 'done', items: r.items });
   });
 
@@ -94,17 +94,19 @@ describe('topUp', () => {
     expect(stored[0]).toMatchObject({ type: 'flex' });
     const first = r.planned![0]!;
     expect(first.start % grid).toBe(0);
-    expect(first.start - edgeBefore).toBe(stored[0]!['duration']);
+    expect(Math.abs(first.start - edgeBefore - Number(stored[0]!['duration']))).toBeLessThanOrEqual(1);
     // Every item is where the plan put it: the stored lineup, laid end to end from the channel's start time, reaches each slot
     // and each block boundary at exactly the planned millisecond.
     let at = edgeBefore;
     let i = 0;
-    const clock = (n: number): void => { for (let k = 0; k < n; k++) at += Number(stored[i++]!['duration']); };
+    const clock = (n: number): void => { for (let k = 0; k < n; k++) at += Number(odd.fake.real(stored[i++]!)['duration']); };
     clock(1); // the pad
     for (const slot of r.planned!) {
-      expect(at).toBe(slot.start);
+      // never before the line (a guide that cuts off the seconds would show :29:59), and not accumulating over the days planned
+      expect(at - slot.start).toBeGreaterThanOrEqual(-1e-6);
+      expect(at - slot.start).toBeLessThan(3);
       clock(slot.items.length);
-      expect(at).toBe(slot.end);
+      expect(Math.abs(at - slot.end)).toBeLessThan(1);
       expect(slot.start % grid).toBe(0);
       expect(slot.end % grid).toBe(0);
       slot.blocks.forEach((b, j) => {
@@ -113,7 +115,7 @@ describe('topUp', () => {
       });
     }
     expect(i).toBe(stored.length);
-    expect(odd.fake.data.channel.startTime + odd.fake.duration).toBe(r.planned![r.planned!.length - 1]!.end);
+    expect(Math.abs(odd.fake.data.channel.startTime + odd.fake.duration - r.planned![r.planned!.length - 1]!.end)).toBeLessThan(1);
     expect(layoutProblems(r.planned!, first.start, grid)).toEqual([]);
   });
 
@@ -241,7 +243,7 @@ describe('a crash cannot leave the store and Tunarr disagreeing', () => {
     const ch = s.store.channel('Test')!;
     expect(s.store.pendingCommit(ch.id)).toBeUndefined();
     expect(s.store.commits(ch.id)[0]!.status).toBe('done');
-    expect(ch.edge).toBe(s.fake.data.channel.startTime + s.fake.duration);
+    expect(Math.abs(ch.edge - (s.fake.data.channel.startTime + s.fake.duration))).toBeLessThan(1);
     expect((await topUp(s.deps, 'Test')).action).toBe('none'); // and the next run carries on
   });
 
@@ -552,11 +554,11 @@ describe('staging ahead never leaves a gap in the lineup', () => {
       if (r.action !== 'appended') { s.clock.t += DAY; continue; }
       // What was added starts exactly where the lineup ended (a pad only to reach the grid), and touches: no gap, ever.
       const first = r.planned![0]!;
-      expect(first.start - edgeBefore).toBeGreaterThanOrEqual(0);
+      expect(first.start - edgeBefore).toBeGreaterThanOrEqual(-3);
       expect(first.start - edgeBefore).toBeLessThan(grid);
       expect(r.planned!.every((x, i, all) => i === 0 || all[i - 1]!.end === x.start)).toBe(true);
       expect(layoutProblems(r.planned!, first.start, grid)).toEqual([]);
-      expect(s.fake.data.channel.startTime + s.fake.duration).toBe(r.planned![r.planned!.length - 1]!.end);
+      expect(Math.abs(s.fake.data.channel.startTime + s.fake.duration - r.planned![r.planned!.length - 1]!.end)).toBeLessThan(3);
       // The far slot is not in the lineup until a commit reaches it, and then it is exactly at its time, pinned.
       const planned = r.planned!.find((x) => x.start === slot.start);
       const inLineup = stored().slice(before).some((i) => i['id'] === 'special');

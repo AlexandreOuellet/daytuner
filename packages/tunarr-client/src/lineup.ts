@@ -78,9 +78,65 @@ export interface Alignment {
 export function alignToGrid(edge: number, grid: number): Alignment {
   if (!Number.isFinite(edge)) throw new RangeError('the end of the lineup must be a number');
   if (!Number.isSafeInteger(grid) || grid <= 0) throw new RangeError('grid must be a positive whole number of milliseconds');
-  const from = Math.ceil(edge / grid) * grid;
-  const flex = Math.round(from - edge);
+  // An end up to a few milliseconds past a grid line is that line: Tunarr counts clips at their real lengths, so a lineup written to end
+  // on the line can read back a fraction of a millisecond past it, and that must not cost a whole grid step.
+  const from = Math.ceil((edge - LATE_MS) / grid) * grid;
+  const flex = Math.max(0, Math.round(from - edge));
   return { from, flex };
+}
+
+/** How far past a grid line an end or a start still counts as on it. */
+export const LATE_MS = 3;
+
+export interface SnapOptions {
+  /** Where the first item starts on the grid (a grid line). */
+  from: number;
+  grid: number;
+  /** Where Tunarr will really count the first item to start (the lineup's real end, plus any flex already added). */
+  startReal: number;
+  /** An item's length as Tunarr counts it, with its fraction. */
+  real: (item: LineupItem) => number;
+}
+
+/**
+ * Keeps the lineup on the grid as Tunarr counts it. Tunarr plays and counts each clip at its real length (29976.961 ms) and the
+ * last piece of a program at the program's real length, while DayTuner writes whole milliseconds, so the two timelines part by a
+ * fraction of a millisecond per break and the difference adds up over days. This walks the items as Tunarr will count them and,
+ * wherever an item is planned to start on a grid line, makes it start there: a flex of the difference (rounded up, so it starts
+ * on the line or less than a millisecond after it, never before) when it would start early, and a shorter flex before it when it
+ * would start late. The end is held within a millisecond of the last line. The plan itself is not changed; only flex is added or
+ * trimmed, and the result is still whole milliseconds.
+ */
+export function snapToGrid(items: readonly LineupItem[], o: SnapOptions): LineupItem[] {
+  const out: LineupItem[] = [];
+  let planned = o.from;
+  let real = o.startReal;
+  let anchor = 0; // where the current stretch since the last grid line began, in `out`
+  const settle = (strict: boolean): void => {
+    const e = real - planned;
+    if (e < -1e-6 && (strict || e <= -1)) {
+      const add = strict ? Math.ceil(-e - 1e-6) : Math.floor(-e);
+      if (add > 0) { out.push({ type: 'flex', duration: add }); real += add; }
+    } else if (e >= 1) {
+      // Take the time back from the latest flex since the last grid line (items between it and here start that much earlier,
+      // and none of them is planned to be on a line).
+      for (let j = out.length - 1; j >= anchor && Math.floor(real - planned) >= 1; j--) {
+        const f = out[j]!;
+        if (f.type !== 'flex') continue;
+        const cut = Math.min(f.duration, Math.floor(real - planned));
+        if (cut === f.duration) out.splice(j, 1); else out[j] = { type: 'flex', duration: f.duration - cut };
+        real -= cut;
+      }
+    }
+  };
+  for (const item of items) {
+    if (planned % o.grid === 0) { settle(true); anchor = out.length; }
+    out.push(item);
+    real += o.real(item);
+    planned += item.duration;
+  }
+  if (planned % o.grid === 0) settle(false);
+  return out;
 }
 
 export interface AppendReport {

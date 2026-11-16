@@ -1,66 +1,73 @@
-# Running DayTuner
+# Deploying DayTuner
 
-One container runs the web interface, its API and the daily scheduler, with one SQLite file on a volume.
+One container runs the web interface, its API and the daily scheduler, with one SQLite file on a volume. Build the image first
+(see [`build.md`](build.md)), or use one built by your own pipeline.
 
-## Build and run
+DayTuner is a companion to a [Tunarr](https://github.com/chrisbenincasa/tunarr) server: it reads Tunarr's library and writes
+channel lineups to it over Tunarr's HTTP API. It needs to reach Tunarr, and nothing else needs to reach DayTuner except you.
+
+## Docker
 
 ```
-docker build -t daytuner .
 docker run -d --name daytuner -p 127.0.0.1:8420:8420 -v daytuner:/config \
-  -e TUNARR_URL=http://tunarr:8000 daytuner
+  -e TUNARR_URL=http://tunarr:8000 -e TZ=America/Toronto daytuner
 ```
 
-Open <http://127.0.0.1:8420>. Settings, all environment variables:
+Or with Compose:
 
-| Variable | Meaning | Default |
-|---|---|---|
-| `TUNARR_URL` | Where Tunarr is. Required. | |
-| `DAYTUNER_ALLOW_WRITES` | `1` lets this container write lineups to Tunarr and run the daily scheduler. Without it DayTuner plans, previews and edits staging, and cannot write. | off |
-| `TZ` | The server's time zone. A channel created from the page gets it (a container is UTC unless this is set). | the system's |
-| `DAYTUNER_DB` | The SQLite file | `/config/daytuner.db` |
-| `DAYTUNER_HOST`, `DAYTUNER_PORT` | Where it listens | `0.0.0.0`, `8420` in the image |
-| `DAYTUNER_UI_DIR` | The built pages | `/app/apps/ui/dist` |
-
-**There is no login.** Anyone who can reach the port can change your schedules and, with writing on, your lineups. Publish it
-only to yourself (`-p 127.0.0.1:8420:8420`), or behind your own authentication.
-
-## First steps
-
-Add a channel from the page ("Add a channel": create one in Tunarr, which needs writing on, or attach one that exists), or from a channel file (see `schedules/example.yaml`), either with the command line in the container or through the API:
-
-```
-docker cp my-channel.yaml daytuner:/config/my-channel.yaml
-docker exec daytuner daytuner channel add /config/my-channel.yaml --floor 7d --step 24h
-docker exec daytuner daytuner channel adopt-history "My Channel" --yes   # start the shows where the lineup already is
+```yaml
+services:
+  daytuner:
+    image: daytuner
+    restart: unless-stopped
+    ports: ["127.0.0.1:8420:8420"]
+    volumes: ["daytuner:/config"]
+    environment:
+      TUNARR_URL: http://tunarr:8000
+      TZ: America/Toronto
+volumes:
+  daytuner:
 ```
 
-`docker exec daytuner daytuner` with no arguments prints every command. The state (shows' places, staged slots, revisions,
-the commit log, cached chapters) is in the volume: back up `/config/daytuner.db`.
+Open <http://127.0.0.1:8420>. Every setting is in [`configure.md`](configure.md).
 
-## Writing to Tunarr
+## Put authentication in front of it
 
-Leave writing off while you look around. Turn it on (`DAYTUNER_ALLOW_WRITES=1`) only for a Tunarr you have a copy of, or once you
-trust a plan: DayTuner appends to a channel's lineup and never changes its start time, but an appended lineup cannot be undone. With
-writing on, each channel is run daily at its own time (default 03:00 in its schedule's zone; change it with
-`POST /api/channels/:name/settings`), and missed runs are made up after a restart.
+**DayTuner has no login of its own.** Anyone who can reach its port can change your schedules and, once writing is switched on,
+your Tunarr lineups. Do one of these:
 
-## Ad and filler clips
+- publish the port only to yourself (`127.0.0.1:8420`, as above), or a private network;
+- or put it behind a reverse proxy that authenticates users (Authelia, Authentik, oauth2-proxy, Caddy or nginx with basic auth, and
+  so on), and do not expose the container's port any other way.
 
-DayTuner never opens a clip file. It only reads Tunarr's filler lists (their names, clip ids and lengths) over Tunarr's API and writes
-lineup items that point at those clips. **Tunarr** has to be able to play them: the folder that holds your ad and filler clips (in the
-setup this was tested against, a folder Tunarr sees as `/ads`) must be mounted into the Tunarr container, at the path its filler list
-uses. That is Tunarr's configuration, not DayTuner's, and DayTuner needs no setting for it.
-
-What it looks like when the folder is missing: the schedule and the guide are right and the programs play, but each ad break fails to
-play its clips (the timeline carries on and the next program starts on time). Clips that have no video (audio-only tracks) fail the same
-way in Tunarr's stock player. Playing the ad and filler clips of a DayTuner lineup has not been checked yet; see `docs/status.md`.
+The health check, `GET /api/health`, answers without touching Tunarr and is safe to leave open for an orchestrator.
 
 ## Kubernetes
 
-[`deploy/kubernetes.example.yaml`](../deploy/kubernetes.example.yaml) has a volume, a deployment (one replica: the database has one
-owner) and a service. It has no ingress: exposing it, with authentication in front (DayTuner has no login), is part of your
-cluster's own configuration, not of this repository.
+[`deploy/kubernetes.example.yaml`](../deploy/kubernetes.example.yaml) has a volume, a deployment and a service. Notes:
 
-## Updating
+- **One replica only.** The SQLite file has one owner. Use the `Recreate` strategy.
+- The process runs as a non-root user, so give the pod `securityContext: { fsGroup: 1000 }` or the volume will not be writable
+  ("unable to open database file").
+- The example has no ingress. Exposing it, with authentication in front, is part of your cluster's own configuration.
+- Memory: about 1 GiB is plenty for a large library.
 
-The image holds no state. Pull or build a new one and restart; a database from an older version is upgraded when it opens.
+## Writing to Tunarr
+
+Writing is **off** until you set `DAYTUNER_ALLOW_WRITES=1`. Until then DayTuner plans, previews and edits staging, and cannot write.
+Turn it on only once you trust a plan, or against a copy of your Tunarr first: it appends to a channel's lineup and an appended
+lineup cannot be undone (a schedule can be rolled back, and the lineup re-planned from the new revision, but what was written stays).
+With writing on, each channel runs daily (see [`configure.md`](configure.md)), and missed runs are made up after a restart.
+
+## Ad and filler clips
+
+DayTuner never opens a clip file. It reads Tunarr's filler lists (names, clip ids, lengths) over the API and writes lineup items
+that point at those clips. **Tunarr** has to be able to play them: the folder holding your ad and filler clips must be mounted into
+the Tunarr container at the path its filler list uses. DayTuner needs no setting for it. Without that mount, a schedule and its
+guide are right and the programs play, but each break fails to play its clips (the timeline carries on and the next program
+starts on time).
+
+## Backups and updates
+
+All state (shows' places, schedule revisions, staged slots, the commit log, cached chapters) is in `/config/daytuner.db`: back
+that file up. The image holds no state: pull or build a new one and restart; an older database is upgraded when it opens.
