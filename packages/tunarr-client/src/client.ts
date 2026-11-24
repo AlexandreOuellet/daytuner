@@ -49,6 +49,19 @@ export interface FillerListInfo {
   count: number;
 }
 
+/** A video of a local media source (music videos, concerts, ads): Tunarr's `other_video`. */
+export interface VideoInfo {
+  id: string;
+  /** The file name without its extension, as Tunarr titles a local file. */
+  title: string;
+  duration: number;
+  exact?: number;
+  /** The full path in the pod, such as `/musicvideos/Gorillaz - Feel Good Inc.mp4`. */
+  path: string;
+  /** Tunarr's own tags: the folder of a local file. */
+  tags: string[];
+}
+
 export interface MovieInfo {
   id: string;
   title: string;
@@ -268,6 +281,22 @@ export class TunarrClient {
       tags: strings(r['tags']),
       actors: names(r['actors']),
       directors: names(r['directors']),
+    }));
+  }
+
+  /** Every video of every local media source. Pick the ones wanted by their path. */
+  async otherVideos(): Promise<VideoInfo[]> {
+    const results = await this.search({
+      type: 'value',
+      fieldSpec: { key: 'type', name: 'type', type: 'string', op: '=', value: ['other_video'] },
+    }, 1000);
+    return results.map((r) => ({
+      id: str(r['uuid'], 'uuid'),
+      title: str(r['title'], 'title'),
+      duration: Math.round(num(r['duration'], 'video duration')),
+      exact: num(r['duration'], 'video duration'),
+      path: typeof r['externalId'] === 'string' ? r['externalId'] : '',
+      tags: strings(r['tags']),
     }));
   }
 

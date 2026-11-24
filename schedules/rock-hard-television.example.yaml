@@ -1,0 +1,42 @@
+# A music channel built from run slots (docs/run-slots.md). Read by @daytuner/schedule, which a test runs on this very file.
+# Windows start and end on the 30-minute grid; the videos inside play back to back and are not on it.
+channel: rock-hard-television
+timezone: America/Toronto
+grid: 30m
+ads:
+  step: 15s
+  ratio: { min: 0%, max: 10% }          # ads may take at most 10% of a window
+  tail: { list: Old Ads, length: 0-5m }  # ads only at the very end of a window, and only if something is left
+bumpers:
+  rotation: { list: RHTV Idents, every: 3-4 }   # a bumper after every 3 or 4 videos (a range, so the end can be reached exactly)
+  tail: { list: RHTV Idents }
+interstitial:                           # the closer: fills the time left before the tail
+  list: Sessions                        # a Tunarr filler list of live sets (KEXP, NPR Tiny Desk, ...)
+  length: 2m-30m                        # only clips of this length
+  cooldown: 14d                         # a clip does not repeat within 14 days
+  cut: true                             # the last clip may be cut off at the end of the window rather than leave dead air
+pools:
+  punk:    { videos: { path: /musicvideos, tag: Punk & Ska } }
+  metal:   { videos: { path: /musicvideos, tag: Metal } }
+  alt:     { videos: { path: /musicvideos, tag: [Alt & Grunge, Punk & Ska] } }
+  sessions-hour: { videos: { path: /concerts } }
+  # Films play in their own slot, with the usual blocks around them.
+  films:   { movies: { genre: Documentary, duration: "<=117m" }, order: shuffle }
+fill: alt
+week:
+  mon:
+    - { at: "17:00", length: 90m, pool: punk, run: true, tags: [Punk & Ska] }   # the closer takes punk (or untagged) clips
+    - { at: "18:30", length: 1h, pool: sessions-hour, run: true }
+    - { at: "19:30", length: 30m, pool: metal, run: true, tags: [Metal] }
+    - { at: "20:00", length: 2h, pool: films }
+    - { at: "22:00", length: 2h, pool: alt, run: true }
+# The channel's tags: a CSV of genre,file (one row per tag), kept in the channel. An item is matched by its file name, which Tunarr
+# uses as the title of a local file. Generating it is manual for now. A real one has a row per video.
+tagsCsv: |
+  genre,file
+  Punk & Ska,Rancid - Ruby Soho.mp4
+  Punk & Ska,Bad Religion - American Jesus.mp4
+  Metal,Gojira - Stranded.mp4
+  Alt & Grunge,Foo Fighters - Everlong.mp4
+  Punk & Ska,NPR Tiny Desk - Gogol Bordello.mp4
+  Metal,NPR Tiny Desk - Napalm Death.mp4

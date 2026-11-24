@@ -97,6 +97,8 @@ export function place(week: readonly SlotModel[], what: TemplateModel & { name?:
   return {
     day: start.day, at: start.at, length, pool: what.pool,
     ...(what.link ? { link: what.link, ...(what.linkMode ? { linkMode: what.linkMode } : {}) } : {}),
+    ...(what.run ? { run: true as const } : {}),
+    ...(what.tags ? { tags: what.tags } : {}),
     ...(what.name ? { template: what.name } : {}),
   };
 }

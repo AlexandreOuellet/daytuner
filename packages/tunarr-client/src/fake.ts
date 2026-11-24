@@ -6,7 +6,9 @@ import type { FetchLike } from './client.js';
 export interface FakeData {
   shows: { id: string; title: string; episodes: { id: string; title: string; duration: number; season: number; episode: number; chapters?: { start: number; end: number; type?: string }[] }[] }[];
   movies: { id: string; title: string; duration: number; genres: string[]; chapters?: { start: number; end: number; type?: string }[] }[];
-  fillerLists: { id: string; name: string; clips: { id: string; duration: number }[] }[];
+  fillerLists: { id: string; name: string; clips: { id: string; duration: number; title?: string }[] }[];
+  /** Local videos (Tunarr's `other_video`). */
+  videos?: { id: string; title: string; duration: number; path: string; tags?: string[] }[];
   channel: { id: string; number: number; name: string; startTime: number };
   /** Items already in the lineup (for a channel with a history). */
   lineup?: Record<string, unknown>[];
@@ -123,7 +125,7 @@ export class FakeTunarr {
     const fl = /^\/api\/filler-lists\/([^/]+)\/programs$/.exec(path);
     if (method === 'GET' && fl) {
       const list = d.fillerLists.find((l) => l.id === fl[1]);
-      return list ? json(list.clips.map((c) => ({ type: 'content', id: c.id, duration: c.duration + 0.25, program: { title: c.id } }))) : json({}, 404);
+      return list ? json(list.clips.map((c) => ({ type: 'content', id: c.id, duration: c.duration + 0.25, program: { title: c.title ?? c.id } }))) : json({}, 404);
     }
     if (method === 'POST' && path === '/api/programs/search') {
       const q = body as { query: { filter: { fieldSpec: { value: string[] } } }; page: number; limit: number };
@@ -131,7 +133,9 @@ export class FakeTunarr {
       const all =
         type === 'movie'
           ? d.movies.map((m) => ({ uuid: m.id, type: 'movie', title: m.title, duration: m.duration + 0.4, genres: m.genres.map((name) => ({ name })) }))
-          : d.shows.map((s) => ({ uuid: s.id, type: 'show', title: s.title }));
+          : type === 'other_video'
+            ? (d.videos ?? []).map((v) => ({ uuid: v.id, type: 'other_video', title: v.title, duration: v.duration + 0.2, externalId: v.path, tags: v.tags ?? [] }))
+            : d.shows.map((s) => ({ uuid: s.id, type: 'show', title: s.title }));
       const start = q.page * q.limit;
       return json({ results: all.slice(start, start + q.limit), page: q.page, totalPages: Math.max(1, Math.ceil(all.length / q.limit)), totalHits: all.length });
     }

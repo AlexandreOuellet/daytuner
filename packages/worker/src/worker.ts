@@ -81,7 +81,8 @@ const sumMs = (items: readonly { duration: number }[]): number => items.reduce((
  * What is wrong with the planned slots as they would be written, or an empty list. Checked before anything is sent, and the
  * rules are the grid rules of `planning-rules.md`: the first slot starts where the lineup is aligned to, slots touch, each starts
  * and ends on the grid, what is in each adds up to its length exactly (whole milliseconds), and every block boundary inside a slot
- * is on the grid (the first block of a slot may start after a head and the last may end where a tail starts).
+ * is on the grid (the first block of a slot may start after a head and the last may end where a tail starts). A run slot has no
+ * block boundaries to check: its blocks are its items.
  */
 export function layoutProblems(slots: readonly PlannedSlot[], from: number, grid: number): string[] {
   const out: string[] = [];
@@ -95,7 +96,8 @@ export function layoutProblems(slots: readonly PlannedSlot[], from: number, grid
     const items = sumMs(s.items);
     if (items !== s.end - s.start) say(`${name}: its items last ${items} ms but the slot lasts ${s.end - s.start} ms`);
     if (s.items.some((x) => !Number.isInteger(x.duration))) say(`${name} has an item whose length is not a whole number of milliseconds`);
-    s.blocks.forEach((b, j) => {
+    // A run slot's blocks are its items: only the slot's own edges are on the grid.
+    if (!s.run) s.blocks.forEach((b, j) => {
       if (j > 0 && !on(b.start)) say(`${name}: block ${j + 1} starts at ${b.start}, off the grid`);
       if (j < s.blocks.length - 1 && !on(b.end)) say(`${name}: block ${j + 1} ends at ${b.end}, off the grid`);
     });

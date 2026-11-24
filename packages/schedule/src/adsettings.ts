@@ -17,7 +17,11 @@ export interface AdSettings {
   mid?: { list: string; every: number; min: number; max: number; tailBuffer: number; minGap?: number; chapterTypes?: ChapterKind[] };
   /** The clip list a position's bumper comes from. */
   bumpers: Partial<Record<Edge, string>>;
+  /** Run slots (docs/run-slots.md): a bumper after every N items, N in this range. */
+  rotation?: { list: string; every: { min: number; max: number } };
   interstitial?: string;
+  /** The closer's rules (docs/run-slots.md): the length of clips it may use, a cooldown (ms) and whether the last clip may be cut off. */
+  closer?: { length?: { min: number; max: number }; cooldown?: number; cut?: boolean };
 }
 
 const EDGES: readonly Edge[] = ['head', 'pre', 'post', 'tail'];
@@ -37,7 +41,15 @@ export function adSettingsOf(file: ScheduleFile): AdSettings {
     positions,
     ...(m ? { mid: { list: m.list, every: m.every, min: m.length.min, max: m.length.max, tailBuffer: m.tailBuffer, ...(m.minGap !== undefined ? { minGap: m.minGap } : {}), ...(m.chapterTypes ? { chapterTypes: m.chapterTypes } : {}) } } : {}),
     bumpers,
+    ...(file.bumpers.rotation ? { rotation: { list: file.bumpers.rotation.list, every: { ...file.bumpers.rotation.every } } } : {}),
     ...(file.interstitial ? { interstitial: file.interstitial.list } : {}),
+    ...(file.interstitial && (file.interstitial.length || file.interstitial.cooldown !== undefined || file.interstitial.cut !== undefined)
+      ? { closer: {
+          ...(file.interstitial.length ? { length: { ...file.interstitial.length } } : {}),
+          ...(file.interstitial.cooldown !== undefined ? { cooldown: file.interstitial.cooldown } : {}),
+          ...(file.interstitial.cut !== undefined ? { cut: file.interstitial.cut } : {}),
+        } }
+      : {}),
   };
 }
 
@@ -100,7 +112,11 @@ export function applyAdSettings(text: string, s: AdSettings): string {
     ...(m.minGap !== undefined ? { minGap: formatDuration(m.minGap) } : {}), ...(m.chapterTypes ? { chapterTypes: m.chapterTypes } : {}),
   });
   for (const e of EDGES) set(['bumpers', e], s.bumpers[e] ? { list: s.bumpers[e] } : undefined);
-  set(['interstitial'], s.interstitial ? { list: s.interstitial } : undefined);
+  const c = s.closer;
+  set(['bumpers', 'rotation'], s.rotation ? { list: s.rotation.list, every: s.rotation.every.min === s.rotation.every.max ? s.rotation.every.min : `${s.rotation.every.min}-${s.rotation.every.max}` } : undefined);
+  set(['interstitial'], s.interstitial
+    ? { list: s.interstitial, ...(c?.length ? { length: formatRange(c.length.min, c.length.max) } : {}), ...(c?.cooldown !== undefined ? { cooldown: formatDuration(c.cooldown) } : {}), ...(c?.cut !== undefined ? { cut: c.cut } : {}) }
+    : undefined);
   if (!changed) return text;
   const out = doc.toString({ lineWidth: 0 });
   parseScheduleFile(out);

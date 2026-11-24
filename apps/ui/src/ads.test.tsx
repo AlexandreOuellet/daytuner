@@ -50,6 +50,28 @@ describe('helpers and routing', () => {
   });
 });
 
+describe('the ads page: runs and the closer', () => {
+  it('sets the bumper between the items of a run and the closer rules, and saves them', async () => {
+    const posts = serve();
+    render(<App />);
+    await screen.findByRole('group', { name: /A block, from the start of the slot to its end/ });
+    fireEvent.change(screen.getByLabelText('Bumper between items from'), { target: { value: 'Station Idents' } });
+    expect((screen.getByLabelText(/after every/) as HTMLInputElement).value).toBe('3');
+    fireEvent.change(screen.getByLabelText(/after every/), { target: { value: '2' } });
+    fireEvent.change(screen.getByLabelText(/^to/, { selector: '#rotation-max' }), { target: { value: '5' } });
+    fireEvent.change(screen.getByLabelText(/Only clips of at least/), { target: { value: '2' } });
+    fireEvent.change(screen.getByLabelText(/and at most/), { target: { value: '30' } });
+    fireEvent.change(screen.getByLabelText(/does not repeat within/), { target: { value: '14' } });
+    fireEvent.click(screen.getByLabelText(/may be cut off/));
+    fireEvent.click(screen.getByRole('button', { name: /Save as a new revision/ }));
+    await waitFor(() => expect(posts.some((p) => p.url.endsWith('/ads'))).toBe(true));
+    const saved = posts.find((p) => p.url.endsWith('/ads'))!.body.settings ?? posts.find((p) => p.url.endsWith('/ads'))!.body;
+    expect(saved.rotation).toEqual({ list: 'Station Idents', every: { min: 2, max: 5 } });
+    expect(saved.closer).toEqual({ length: { min: 120_000, max: 1_800_000 }, cooldown: 14 * 86_400_000, cut: true });
+    expect(saved.interstitial).toBe('Fillers');
+  });
+});
+
 describe('the ads page', () => {
   it('draws the block in order and says what each position holds', async () => {
     serve();

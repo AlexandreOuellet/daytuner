@@ -9,6 +9,22 @@ const slot = (items: PlannedSlot['items']): PlannedSlot => ({
 const lists = { 'Old Ads': 'list-ads', Idents: 'list-idents', Fillers: 'list-fill' };
 
 describe('toLineupItems', () => {
+  it('sends a run slot\'s rotation bumper as a mid filler, and a cut closer clip with its shorter duration', () => {
+    const items = toLineupItems(
+      [slot([
+        { kind: 'content', programId: 'prog', startOffset: 0, duration: 200_000 },
+        { kind: 'filler', role: 'bumper', position: 'rotation', list: 'Idents', clipId: 'b1', duration: 5000 },
+        { kind: 'filler', role: 'interstitial', position: 'gap', list: 'Fillers', clipId: 'f1', duration: 130_000, cut: true },
+      ])],
+      lists,
+    );
+    expect(items).toEqual([
+      { type: 'content', id: 'prog', startOffsetMs: 0, duration: 200_000 },
+      { type: 'filler', id: 'b1', fillerListId: 'list-idents', fillerType: 'mid', duration: 5000 },
+      { type: 'filler', id: 'f1', fillerListId: 'list-fill', fillerType: 'fallback', duration: 130_000 },
+    ]);
+  });
+
   it('converts content pieces, ads, bumpers, interstitials and dead air', () => {
     const items = toLineupItems(
       [slot([

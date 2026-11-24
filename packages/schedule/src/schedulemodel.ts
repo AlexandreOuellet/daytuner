@@ -17,6 +17,10 @@ export interface SlotModel {
   pool: string;
   link?: string;
   linkMode?: 'continue' | 'rerun';
+  /** A run slot (docs/run-slots.md). */
+  run?: true;
+  /** The closer's tags. */
+  tags?: string[];
   /** The template it was placed from, a label only. */
   template?: string;
 }
@@ -27,6 +31,8 @@ export interface TemplateModel {
   length: number;
   link?: string;
   linkMode?: 'continue' | 'rerun';
+  run?: true;
+  tags?: string[];
 }
 
 export type FilterOp = '<=' | '<' | '>=' | '>' | '=';
@@ -84,13 +90,13 @@ export function scheduleModelOf(file: ScheduleFile): ScheduleModel {
     for (const s of file.week[name] ?? []) {
       week.push({
         day, at: s.at, length: s.length ?? implicit.get(`${day}@${s.at}`)!, pool: s.pool,
-        ...(s.link ? { link: s.link } : {}), ...(s.linkMode ? { linkMode: s.linkMode } : {}), ...(s.template ? { template: s.template } : {}),
+        ...(s.link ? { link: s.link } : {}), ...(s.linkMode ? { linkMode: s.linkMode } : {}), ...(s.run ? { run: true as const } : {}), ...(s.tags ? { tags: [...s.tags] } : {}), ...(s.template ? { template: s.template } : {}),
       });
     }
   });
   const templates: Record<string, TemplateModel> = {};
   for (const [name, t] of Object.entries(file.templates)) {
-    templates[name] = { pool: t.pool, length: t.length, ...(t.link ? { link: t.link } : {}), ...(t.linkMode ? { linkMode: t.linkMode } : {}) };
+    templates[name] = { pool: t.pool, length: t.length, ...(t.link ? { link: t.link } : {}), ...(t.linkMode ? { linkMode: t.linkMode } : {}), ...(t.run ? { run: true as const } : {}), ...(t.tags ? { tags: [...t.tags] } : {}) };
   }
   const pools: Record<string, PoolModel> = {};
   for (const [name, p] of Object.entries(file.pools)) {
@@ -147,6 +153,7 @@ export function applyScheduleModel(text: string, model: Pick<ScheduleModel, 'wee
     if (s.at % file.grid !== 0) throw new RangeError(`the ${DAY_NAMES[s.day]} slot at ${formatTimeOfDay(s.at)} is not on the ${formatDuration(file.grid)} grid`);
     if (!(s.pool in model.pools)) throw new RangeError(`the ${DAY_NAMES[s.day]} slot at ${formatTimeOfDay(s.at)} uses an unknown pool "${s.pool}"`);
     if (s.linkMode && !s.link) throw new RangeError('a link mode needs a link name');
+    if (s.run && s.link) throw new RangeError(`the ${DAY_NAMES[s.day]} slot at ${formatTimeOfDay(s.at)} is a run slot and cannot be linked`);
     if (!Number.isInteger(s.length) || s.length <= 0 || s.length % file.grid !== 0 || s.length > 7 * 86_400_000) throw new RangeError(`the ${DAY_NAMES[s.day]} slot at ${formatTimeOfDay(s.at)} has a length that is not a positive multiple of the ${formatDuration(file.grid)} grid, at most 7 days`);
     if (s.template !== undefined && model.templates && !(s.template in model.templates)) throw new RangeError(`the ${DAY_NAMES[s.day]} slot at ${formatTimeOfDay(s.at)} comes from an unknown template "${s.template}"`);
     const key = `${s.day}@${s.at}`;
@@ -161,6 +168,7 @@ export function applyScheduleModel(text: string, model: Pick<ScheduleModel, 'wee
     if (!(t.pool in model.pools)) throw new RangeError(`template "${name}" uses an unknown pool "${t.pool}"`);
     if (!Number.isInteger(t.length) || t.length <= 0 || t.length % file.grid !== 0) throw new RangeError(`template "${name}" has a length that is not a positive multiple of the ${formatDuration(file.grid)} grid`);
     if (t.linkMode && !t.link) throw new RangeError(`template "${name}": a link mode needs a link name`);
+    if (t.run && t.link) throw new RangeError(`template "${name}" is a run slot and cannot be linked`);
   }
   const gaps = gapsOf(model.week.map((s) => ({ day: s.day, at: s.at, length: s.length })));
   if (gaps.length > 0 && fill === undefined) {
@@ -193,7 +201,7 @@ export function applyScheduleModel(text: string, model: Pick<ScheduleModel, 'wee
     // A length is written only when it is not simply "until the next slot", so files without gaps stay as they were.
     const value = slots.length === 0 ? undefined : slots.map((s) => ({
       at: formatTimeOfDay(s.at), ...(s.length !== implicit.get(`${s.day}@${s.at}`) ? { length: formatDuration(s.length) } : {}), pool: s.pool,
-      ...(s.link ? { link: s.link } : {}), ...(s.linkMode ? { linkMode: s.linkMode } : {}), ...(s.template ? { template: s.template } : {}),
+      ...(s.link ? { link: s.link } : {}), ...(s.linkMode ? { linkMode: s.linkMode } : {}), ...(s.run ? { run: true } : {}), ...(s.tags ? { tags: s.tags } : {}), ...(s.template ? { template: s.template } : {}),
     }));
     if (value === undefined) doc.deleteIn(['week', name]);
     else doc.setIn(['week', name], doc.createNode(value));
@@ -210,7 +218,7 @@ export function applyScheduleModel(text: string, model: Pick<ScheduleModel, 'wee
   }
   if (!same(templates, now.templates)) {
     changed = true;
-    const value = Object.fromEntries(Object.entries(templates).map(([n, t]) => [n, { pool: t.pool, length: formatDuration(t.length), ...(t.link ? { link: t.link } : {}), ...(t.linkMode ? { linkMode: t.linkMode } : {}) }]));
+    const value = Object.fromEntries(Object.entries(templates).map(([n, t]) => [n, { pool: t.pool, length: formatDuration(t.length), ...(t.link ? { link: t.link } : {}), ...(t.linkMode ? { linkMode: t.linkMode } : {}), ...(t.run ? { run: true } : {}), ...(t.tags ? { tags: t.tags } : {}) }]));
     if (Object.keys(value).length === 0) doc.deleteIn(['templates']);
     else doc.setIn(['templates'], doc.createNode(value));
   }

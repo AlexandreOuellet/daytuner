@@ -31,6 +31,13 @@ made. This note is only about what the page shows and does.
   the ad share. A "more" section on each position opens the length range, the padding step and the mid-break rules
   (every N minutes, tail buffer, minimum gap, chapter types).
 
+## Run slots and the closer
+
+Two boxes sit below the block (see [`run-slots.md`](run-slots.md)). **Between the items of a run** sets the `rotation` bumper: its list and
+how many items pass before it (a range). **Whatever nothing else fills (the closer)** is the interstitial list, with "Closer rules": the
+length of clips it may use, a cooldown in days, and whether the last clip may be cut off at the end of the slot. They are saved with the
+rest as a new revision, and a save keeps what the page does not show.
+
 ## Built (`apps/ui/src/pages/Ads.tsx`)
 
 The page draws the block in order (head, before, during, after, tail) with what each holds; each box opens a simple editor (ads list,

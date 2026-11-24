@@ -4,6 +4,7 @@
 import { parse as parseYaml } from 'yaml';
 import { z } from 'zod';
 import { languageCode } from './languages.js';
+import { emptyTagIndex, parseTagsCsv, type TagIndex } from './tags.js';
 import { expandWeek } from './weekplan.js';
 import {
   parseDuration, parseDurationFilter, parseMonthDay, parsePercent, parseRange, parseTimeOfDay,
@@ -34,6 +35,26 @@ const range = z.union([z.string(), z.number()]).transform((v, ctx): MsRange => {
   }
 });
 
+/** A whole number of items, or "3-4" for a range: 3 to 4. For `bumpers.rotation.every`. */
+export function parseCountRange(value: string | number): { min: number; max: number } {
+  const parts = String(value).trim().split('-');
+  const nums = parts.map((p) => (/^\d+$/.test(p.trim()) ? Number(p) : NaN));
+  if (parts.length < 1 || parts.length > 2 || nums.some((n) => !Number.isInteger(n) || n < 1)) {
+    throw new Error(`"${value}" is not a number of items or a range of them (use 3 or 3-4)`);
+  }
+  const [min, max] = [nums[0]!, nums[1] ?? nums[0]!];
+  if (max < min) throw new Error(`"${value}" has a maximum below its minimum`);
+  return { min, max };
+}
+const countRange = z.union([z.string(), z.number()]).transform((v, ctx) => {
+  try {
+    return parseCountRange(v);
+  } catch (e) {
+    ctx.addIssue({ code: 'custom', message: e instanceof Error ? e.message : String(e) });
+    return z.NEVER;
+  }
+});
+
 const chapterType = z.enum(['chapter', 'intro', 'outro', 'break', 'recap']);
 
 const adPosition = z.object({ list: z.string().optional(), length: range }).strict();
@@ -47,6 +68,15 @@ const midPosition = z.object({
 }).strict();
 
 const list = z.object({ list: z.string() }).strict();
+/** Run slots only: a bumper after every N items of a run (docs/run-slots.md). */
+const rotation = z.object({ list: z.string(), every: countRange }).strict();
+/** The closer: the clips that fill the time left before the tail (docs/run-slots.md). */
+const interstitial = z.object({
+  list: z.string(),
+  length: range.optional(),
+  cooldown: duration.optional(),
+  cut: z.boolean().optional(),
+}).strict();
 
 /** A show is a title, or a title plus the library's id for it (the id decides when present). */
 const showRef = z.object({ show: z.string(), id: z.string().optional() }).strict();
@@ -114,9 +144,16 @@ const pool = z.object({
     match: many(movieRule).optional(),
     except: z.array(movieRule).optional(),
   }).strict().optional(),
+  /** Local videos (music videos, concerts) by folder, with optional tags from the channel's CSV: see docs/run-slots.md. */
+  videos: z.object({
+    path: z.string().min(1),
+    tag: oneOrMany.optional(),
+    title: oneOrMany.optional(),
+    duration: z.string().transform(via(parseDurationFilter)).optional(),
+  }).strict().optional(),
   order: z.enum(['sequential', 'shuffle']).optional(),
-}).strict().refine((p) => (p.shows === undefined) !== (p.movies === undefined), {
-  message: 'a pool has either shows or movies, not both and not neither',
+}).strict().refine((p) => [p.shows, p.movies, p.videos].filter((x) => x !== undefined).length === 1, {
+  message: 'a pool has one of shows, movies or videos',
 }).refine((p) => p.episodes === undefined || p.shows !== undefined, { message: 'episodes only goes with shows' });
 
 const play = z.union([
@@ -138,16 +175,24 @@ const slot = z.object({
   pool: z.string(),
   link: z.string().optional(),
   linkMode: z.enum(['continue', 'rerun']).optional(),
+  /** A run slot (docs/run-slots.md): short items back to back, only the window on the grid. */
+  run: z.literal(true).optional(),
+  /** The closer takes clips with one of these tags (from `tagsCsv`), or with none. */
+  tags: z.array(z.string().min(1)).min(1).optional(),
   /** The template it was placed from (a label; the slot's own fields are what play). */
   template: z.string().optional(),
-}).strict().refine((s) => s.linkMode === undefined || s.link !== undefined, { message: 'linkMode needs a link name' });
+}).strict().refine((s) => s.linkMode === undefined || s.link !== undefined, { message: 'linkMode needs a link name' })
+  .refine((s) => s.run === undefined || s.link === undefined, { message: 'a run slot cannot be linked' });
 
 const template = z.object({
   pool: z.string(),
   length: duration,
   link: z.string().optional(),
   linkMode: z.enum(['continue', 'rerun']).optional(),
-}).strict().refine((t) => t.linkMode === undefined || t.link !== undefined, { message: 'linkMode needs a link name' });
+  run: z.literal(true).optional(),
+  tags: z.array(z.string().min(1)).min(1).optional(),
+}).strict().refine((t) => t.linkMode === undefined || t.link !== undefined, { message: 'linkMode needs a link name' })
+  .refine((t) => t.run === undefined || t.link === undefined, { message: 'a run slot cannot be linked' });
 
 const DAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const;
 const week = z.object(Object.fromEntries(DAYS.map((d) => [d, z.array(slot).optional()])) as Record<(typeof DAYS)[number], z.ZodOptional<z.ZodArray<typeof slot>>>).strict();
@@ -165,8 +210,8 @@ const FileSchema = z.object({
     tail: adPosition.optional(),
     mid: midPosition.optional(),
   }).strict(),
-  bumpers: z.object({ head: list.optional(), pre: list.optional(), post: list.optional(), tail: list.optional() }).strict().default({}),
-  interstitial: list.optional(),
+  bumpers: z.object({ head: list.optional(), pre: list.optional(), post: list.optional(), tail: list.optional(), rotation: rotation.optional() }).strict().default({}),
+  interstitial: interstitial.optional(),
   overflow: z.literal(0).default(0),
   lateness: z.literal(0).default(0),
   pools: z.record(z.string(), pool),
@@ -175,6 +220,8 @@ const FileSchema = z.object({
   /** The pool that plays in time no slot covers. */
   fill: z.string().optional(),
   exceptions: z.array(exception).default([]),
+  /** The channel's tags: a CSV of `genre,file` (one row per tag). Items are matched by file name without the extension. */
+  tagsCsv: z.string().optional(),
   week,
 }).strict();
 
@@ -188,6 +235,15 @@ export function parsePoolDef(raw: unknown): PoolDef {
   const r = pool.safeParse(raw);
   if (!r.success) throw new ScheduleFileError(`the pool has problems: ${r.error.issues.map((i) => `${i.path.join('.') || '(pool)'}: ${i.message}`).join('; ')}`);
   return r.data;
+}
+/** The channel's tags as an index. Empty when the file has none. */
+export function tagIndexOf(file: Pick<ScheduleFile, 'tagsCsv'>): TagIndex {
+  if (file.tagsCsv === undefined) return emptyTagIndex;
+  try {
+    return parseTagsCsv(file.tagsCsv);
+  } catch (e) {
+    throw new ScheduleFileError(`tagsCsv: ${e instanceof Error ? e.message : String(e)}`);
+  }
 }
 export type TemplateFile = z.output<typeof template>;
 export type ExceptionFile = z.output<typeof exception>;
@@ -225,6 +281,19 @@ export function parseScheduleFile(text: string): ScheduleFile {
       if (s.length !== undefined && (s.length <= 0 || s.length % f.grid !== 0 || s.length > 7 * 86_400_000)) {
         throw new ScheduleFileError(`week.${day}: slot at ${s.at} has a length that is not a positive multiple of the grid, at most 7 days`);
       }
+    }
+  }
+  const tags = tagIndexOf(f);
+  for (const [day, slots] of Object.entries(f.week)) {
+    for (const s of slots ?? []) {
+      for (const t of s.tags ?? []) {
+        if (![...tags.all].some((x) => x.toLowerCase() === t.toLowerCase())) throw new ScheduleFileError(`week.${day}: slot at ${s.at} asks for the tag "${t}", which is not in tagsCsv`);
+      }
+    }
+  }
+  for (const [name, p] of Object.entries(f.pools)) {
+    for (const t of p.videos?.tag ?? []) {
+      if (![...tags.all].some((x) => x.toLowerCase() === t.toLowerCase())) throw new ScheduleFileError(`pools.${name}: asks for the tag "${t}", which is not in tagsCsv`);
     }
   }
   for (const [name, t] of Object.entries(f.templates)) {

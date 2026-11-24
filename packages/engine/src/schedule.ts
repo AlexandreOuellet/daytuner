@@ -33,6 +33,22 @@ export interface BumperSettings {
   pre?: { list: string };
   post?: { list: string };
   tail?: { list: string };
+  /** Run slots only (docs/run-slots.md): a bumper after every N items of a run, N in this range, chosen by the planner. */
+  rotation?: { list: string; every: { min: number; max: number } };
+}
+
+/**
+ * The closer (docs/run-slots.md): the clips that fill the time left before the tail, so a slot ends on the grid. Whole clips from a
+ * bag; a repeat or a cut-off clip is better than dead air or a long run of ads.
+ */
+export interface Interstitial {
+  list: string;
+  /** Only clips in this range are used (a 2 to 30 minute performance). */
+  length?: { min: Ms; max: Ms };
+  /** A clip does not repeat within this many milliseconds of its last airing, unless nothing else is left. */
+  cooldown?: Ms;
+  /** The last clip may be cut off at the window's end rather than leave dead air (a hard cut). */
+  cut?: boolean;
 }
 
 export interface Pool {
@@ -49,6 +65,10 @@ export interface SlotDef {
   pool: string;
   /** `continue` shares one head with the other slots of the same name. `rerun` replays behind it. */
   link?: { name: string; mode: 'continue' | 'rerun' };
+  /** A run slot (docs/run-slots.md): short items back to back, only the window on the grid. Needs a shuffled pool. */
+  run?: true;
+  /** The closer takes clips with one of these tags (or with none). Without it, any clip. */
+  tags?: readonly string[];
 }
 
 export interface ExceptionDef {
@@ -68,7 +88,7 @@ export interface Schedule {
   zone: string;
   ads: AdSettings;
   bumpers: BumperSettings;
-  interstitial?: { list: string };
+  interstitial?: Interstitial;
   pools: Record<string, Pool>;
   week: readonly SlotDef[];
   exceptions: readonly ExceptionDef[];
@@ -94,16 +114,19 @@ export interface PlanState {
   sequences: Record<string, SequenceState>;
   /** Shuffled pools and every clip list, by bag key. */
   bags: Record<string, BagState>;
+  /** When each closer clip last aired (`list:clipId` to an epoch time), for the cooldown. */
+  played?: Record<string, Ms>;
 }
 
 export const emptyPlanState = (seed: number): PlanState => ({ rng: seed >>> 0, sequences: {}, bags: {} });
 
-export type ItemPosition = 'head' | 'pre' | 'mid' | 'post' | 'tail' | 'gap';
+export type ItemPosition = 'head' | 'pre' | 'mid' | 'post' | 'tail' | 'gap' | 'rotation';
 
 export type Item =
   /** A piece of a program: a mid break splits one program into several pieces. */
   | { kind: 'content'; programId: string; startOffset: Ms; duration: Ms }
-  | { kind: 'filler'; role: 'ad' | 'bumper' | 'interstitial'; position: ItemPosition; list: string; clipId: string; duration: Ms }
+  /** `cut` is a clip stopped short at the window's end: `duration` is less than the clip's length. */
+  | { kind: 'filler'; role: 'ad' | 'bumper' | 'interstitial'; position: ItemPosition; list: string; clipId: string; duration: Ms; cut?: true }
   /** Dead air. */
   | { kind: 'flex'; duration: Ms };
 
@@ -119,6 +142,8 @@ export interface PlannedSlot {
   blocks: { programId: string; start: Ms; end: Ms; pinned?: true }[];
   /** True when an exception replaced the slot's normal programming. */
   exception: boolean;
+  /** A run slot: its blocks are one per item and do not end on the grid, only the slot does. */
+  run?: true;
   items: Item[];
 }
 
@@ -141,6 +166,9 @@ export type PlanWarningCode =
   | 'locked-slot-conflict'
   | 'pin-does-not-fit'
   | 'pin-dropped'
+  | 'closer-repeat'
+  | 'closer-cut'
+  | 'run-pins-ignored'
   | 'block';
 
 export interface PlanWarning {

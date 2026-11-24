@@ -98,7 +98,8 @@ export function computeMetrics(slots: readonly PlannedSlot[], opts: { grid: Ms; 
     airTime += slot.end - slot.start;
     checkGrid(slot.start);
     checkGrid(slot.end);
-    for (let i = 0; i + 1 < slot.blocks.length; i++) checkGrid(slot.blocks[i]!.end);
+    // A run slot's blocks are its items, which are not on the grid on purpose: only the slot's own edges are.
+    if (!slot.run) for (let i = 0; i + 1 < slot.blocks.length; i++) checkGrid(slot.blocks[i]!.end);
 
     const l = toLocal(opts.zone, slot.start);
     allDays.add(`${l.year}-${l.month}-${l.day}`);

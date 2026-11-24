@@ -21,6 +21,13 @@ So a language rule asks the index for the ids that match and DayTuner keeps thos
 DayTuner never saves a rule into Tunarr and never reads a Tunarr collection. A Jellyfin direct connection would remove Tunarr as
 the source too, but needs Jellyfin credentials and a second client; it is not part of this design (see open point 1).
 
+## Local videos
+
+A pool can also be `videos: { path: /musicvideos, tag: Metal }`: the videos of a local media source (music videos, concerts; Tunarr's
+`other_video`), by folder. `path` is the folder in the Tunarr pod, and `tag`, `title` and `duration` narrow it. A tag comes from the
+channel's own CSV (`tagsCsv`, see [`run-slots.md`](run-slots.md)), because a local file has no genre in Tunarr. The pool is shuffled
+unless `order: sequential`. Local videos have no show or season, so there are no episode rules.
+
 ## The rules
 
 A pool names its members with **rules**. All conditions inside one rule must hold (and); the rules of a pool are joined (or).

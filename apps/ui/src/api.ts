@@ -41,7 +41,11 @@ export interface AdSettings {
   positions: Partial<Record<Edge, { list?: string; min: number; max: number }>>;
   mid?: { list: string; every: number; min: number; max: number; tailBuffer: number; minGap?: number; chapterTypes?: string[] };
   bumpers: Partial<Record<Edge, string>>;
+  /** Run slots: a bumper after every N items, N in this range. */
+  rotation?: { list: string; every: { min: number; max: number } };
   interstitial?: string;
+  /** The closer's rules: usable clip lengths (ms), a cooldown (ms) and whether the last clip may be cut off. */
+  closer?: { length?: { min: number; max: number }; cooldown?: number; cut?: boolean };
 }
 export interface FillerList { id: string; name: string; count: number }
 export interface SampleSegment { type: 'content' | 'ad' | 'bumper' | 'interstitial' | 'dead-air'; position: string; ms: number; list?: string }
@@ -54,8 +58,8 @@ export interface SaveResult {
   impact?: { conflicts: { start: number; reason: string; message: string }[]; changes: unknown[]; staged: number };
 }
 
-export interface SlotModel { day: number; at: number; length: number; pool: string; link?: string; linkMode?: 'continue' | 'rerun'; template?: string }
-export interface TemplateModel { pool: string; length: number; link?: string; linkMode?: 'continue' | 'rerun' }
+export interface SlotModel { day: number; at: number; length: number; pool: string; link?: string; linkMode?: 'continue' | 'rerun'; run?: true; tags?: string[]; template?: string }
+export interface TemplateModel { pool: string; length: number; link?: string; linkMode?: 'continue' | 'rerun'; run?: true; tags?: string[] }
 export interface PoolModel {
   shows?: { show: string; id?: string }[];
   movies?: { genre?: string; duration?: { op: '<=' | '<' | '>=' | '>' | '='; ms: number } };
@@ -92,7 +96,7 @@ export interface StageCheck { conflicts: { start: number; slotId: string; reason
 /** What a planned slot holds, in play order (the engine's items). */
 export type CalendarItem =
   | { kind: 'content'; programId: string; startOffset: number; duration: number }
-  | { kind: 'filler'; role: 'ad' | 'bumper' | 'interstitial'; position: 'head' | 'pre' | 'mid' | 'post' | 'tail' | 'gap'; list: string; clipId: string; duration: number }
+  | { kind: 'filler'; role: 'ad' | 'bumper' | 'interstitial'; position: 'head' | 'pre' | 'mid' | 'post' | 'tail' | 'gap' | 'rotation'; list: string; clipId: string; duration: number; cut?: true }
   | { kind: 'flex'; duration: number };
 export interface SlotTotals { programMs: number; adMs: number; bumperMs: number; interstitialMs: number; deadAirMs: number; adShare: number }
 export interface CalendarPlanned {

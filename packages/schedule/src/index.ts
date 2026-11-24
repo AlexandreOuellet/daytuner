@@ -1,4 +1,5 @@
 export * from './units.js';
+export * from './tags.js';
 export * from './file.js';
 export * from './resolve.js';
 export * from './diff.js';

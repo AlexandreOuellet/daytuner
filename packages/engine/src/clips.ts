@@ -11,6 +11,8 @@ export interface Clip {
   duration: Ms;
   /** The length with its fraction, as Tunarr counts it (see Program.exact). */
   exact?: number;
+  /** What the clip is (genres, from the channel's tags). A closer a slot asks tags for takes clips with one of them, or with none. */
+  tags?: readonly string[];
 }
 
 export interface Fill {
@@ -41,6 +43,7 @@ function round(
   byId: ReadonlyMap<string, Clip>,
   bag: BagState,
   rng: RngState,
+  replay: boolean,
 ): { ids: string[]; sum: Ms; bag: BagState; rng: RngState } {
   let state = rng;
   let remaining = bag.remaining.filter((id) => byId.has(id));
@@ -75,7 +78,8 @@ function round(
   let ids = best.map((i) => order[i]!);
   if (ids.length === 0) {
     // None of the next clips fits: take the first clip anywhere in the bag that does.
-    const any = full.find((id) => byId.get(id)!.duration <= room);
+    // With `replay` off only clips still in the bag are taken: a clip already played this round is never repeated because it fits.
+    const any = (replay ? full : remaining).find((id) => byId.get(id)!.duration <= room);
     if (any !== undefined) {
       ids = [any];
       bestSum = byId.get(any)!.duration;
@@ -91,7 +95,7 @@ function round(
  * are removed from the bag. A long room from a short list goes round the bag again, so a repeat only
  * happens once every clip has played. The result is less than the shortest clip short.
  */
-export function fillWithClips(room: Ms, list: readonly Clip[], bag: BagState, rng: RngState): Fill {
+export function fillWithClips(room: Ms, list: readonly Clip[], bag: BagState, rng: RngState, opts: { replay?: boolean } = {}): Fill {
   assertMs(room, 'room');
   if (room < 0) throw new RangeError('room must not be negative');
   const byId = indexClips(list);
@@ -102,7 +106,7 @@ export function fillWithClips(room: Ms, list: readonly Clip[], bag: BagState, rn
   let b = bag;
   let r = rng;
   while (byId.size > 0 && left >= shortest) {
-    const step = round(left, byId, b, r);
+    const step = round(left, byId, b, r, opts.replay !== false);
     b = step.bag;
     r = step.rng;
     if (step.ids.length === 0) break;

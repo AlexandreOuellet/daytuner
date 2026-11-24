@@ -60,6 +60,7 @@ Settled this session and recorded under Decided in the roadmap: the exception fa
 
 
 - **Ad and bumper interface.** Decided: a block drawn in order, a live sample from the real library, simple first with details on request, saved as a new schedule revision. See [`web-ads.md`](web-ads.md). Open there: warning about unplayable clips, which lists to offer, where the interstitial sits in the picture.
+- **Run slots** (back-to-back short items inside a grid-aligned window, a bumper every N items, a closer with a cooldown and a cut-off, genre tags from a CSV, a pool of local videos): built, with tests, in the engine, the channel file and the web pages; see [`run-slots.md`](run-slots.md). Still to check: a run on a test copy of Tunarr with the guide.
 - **Mid-break offers** need refinement, deferred by the owner until later.
 - **Web pages designed:** all five (the ads page, the cursors page, the staging editor, the schedule designer's main view and the architecture are done).
 - **Phase 4 design.** The staging build plan is in [`staging-design.md`](staging-design.md) (six slices; pins by block number, a lock applies its state effect, ranges in local dates). Storage, conflicts, revisions and the revision-versus-locks rule are decided (see
