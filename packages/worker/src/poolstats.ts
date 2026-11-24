@@ -1,7 +1,7 @@
 // What a pool holds, for the schedule designer: how many programs it matches and how long each is, so the page can say
 // how many fit a slot. Works on pools that are not saved yet.
 
-import { makeLibraryReader, poolDefOf, type LibrarySource, type PoolModel } from '@daytuner/schedule';
+import { makeLibraryReader, poolDefOf, type LibrarySource, type PoolModel, type TagIndex } from '@daytuner/schedule';
 
 export interface PoolStats {
   /** Programs the pool holds. */
@@ -16,8 +16,8 @@ export interface PoolStats {
   error?: string;
 }
 
-export async function poolStats(source: Pick<LibrarySource, 'movies' | 'shows' | 'episodes' | 'idsWhere'>, pools: Record<string, PoolModel>): Promise<Record<string, PoolStats>> {
-  const reader = makeLibraryReader(source);
+export async function poolStats(source: Pick<LibrarySource, 'movies' | 'shows' | 'episodes' | 'idsWhere'> & Partial<Pick<LibrarySource, 'otherVideos'>>, pools: Record<string, PoolModel>, tags?: TagIndex): Promise<Record<string, PoolStats>> {
+  const reader = makeLibraryReader(source, [], tags);
   const out: Record<string, PoolStats> = {};
   for (const [name, def] of Object.entries(pools)) {
     try {

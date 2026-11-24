@@ -4,7 +4,8 @@
 
 import { FILL_LINK, gapsOf } from './weekplan.js';
 import type { AdPosition, Chapter, Library, Pool, Schedule, SlotDef } from '@daytuner/engine';
-import { DAY_NAMES, type PoolDef, type ScheduleFile } from './file.js';
+import { DAY_NAMES, tagIndexOf, type PoolDef, type ScheduleFile } from './file.js';
+import { hasAnyTag, type TagIndex } from './tags.js';
 import { matchesFilter } from './units.js';
 import { indexLookup, RuleError, selectMovies, selectShows, type RuleMovie, type RuleShow, type RuleSource } from './rules.js';
 
@@ -13,13 +14,17 @@ export interface LibrarySource extends RuleSource {
   shows(): Promise<RuleShow[]>;
   episodes(showId: string): Promise<{ id: string; title: string; duration: number; exact?: number; season: number; episode: number; aired?: number }[]>;
   fillerLists(): Promise<{ id: string; name: string }[]>;
-  fillerListClips(listId: string): Promise<{ id: string; duration: number; exact?: number }[]>;
+  fillerListClips(listId: string): Promise<{ id: string; duration: number; exact?: number; title?: string }[]>;
+  /** The videos of local media sources (music videos, concerts). Optional: without it a `videos` pool cannot be resolved. */
+  otherVideos?(): Promise<{ id: string; title: string; duration: number; exact?: number; path: string; tags?: string[] }[]>;
   /** Chapter markers of one program. Optional: a source without it plans with the every-N-minutes offers. */
   chapters?(programId: string, duration: number): Promise<{ start: number; end: number; type: Chapter['type'] }[]>;
 }
 
 /** How many chapter requests run at once. Each takes about 0.4 s in Tunarr. */
 const CHAPTER_CONCURRENCY = 8;
+
+const emptyTags: TagIndex = { tagsOf: () => [], all: new Set() };
 
 export interface Resolved {
   schedule: Schedule;
@@ -83,13 +88,14 @@ function applyEpisodeRules(eps: Episode[], rules: PoolDef['episodes']): Episode[
   return out;
 }
 
-export function makeLibraryReader(source: Pick<LibrarySource, 'movies' | 'shows' | 'episodes' | 'idsWhere'>, notes: string[] = []): {
+export function makeLibraryReader(source: Pick<LibrarySource, 'movies' | 'shows' | 'episodes' | 'idsWhere'> & Partial<Pick<LibrarySource, 'otherVideos'>>, notes: string[] = [], tags: TagIndex = emptyTags): {
   pool: (def: PoolDef) => Promise<ResolvedPool>;
   episodesOfShow: (title: string, id?: string) => ReturnType<LibrarySource['episodes']>;
   movies: () => ReturnType<LibrarySource['movies']>;
 } {
   let showList: Awaited<ReturnType<LibrarySource['shows']>> | undefined;
   let movieList: Awaited<ReturnType<LibrarySource['movies']>> | undefined;
+  let videoList: Awaited<ReturnType<NonNullable<LibrarySource['otherVideos']>>> | undefined;
   const resolveShow = async (title: string, id?: string): Promise<RuleShow> => {
     showList ??= await source.shows();
     if (id !== undefined) {
@@ -163,6 +169,23 @@ export function makeLibraryReader(source: Pick<LibrarySource, 'movies' | 'shows'
         }
         ids = takeTurns(perShow);
         order = def.order === 'shuffle' ? 'shuffled' : 'ordered';
+      } else if (def.videos) {
+        if (!source.otherVideos) throw new ResolveError('this library source cannot read local videos, so a videos pool cannot be resolved');
+        videoList ??= await source.otherVideos();
+        const v = def.videos;
+        const prefix = v.path.endsWith('/') ? v.path : `${v.path}/`;
+        const chosen = videoList
+          .filter((x) => x.path.startsWith(prefix))
+          .filter((x) => v.title === undefined || v.title.some((t) => normalize(x.title).includes(normalize(t))))
+          .filter((x) => v.duration === undefined || matchesFilter(x.duration, v.duration))
+          .filter((x) => v.tag === undefined || hasAnyTag(tags.tagsOf(x.title), v.tag))
+          .sort((a, b) => a.path.localeCompare(b.path));
+        for (const x of chosen) {
+          programs[x.id] = { duration: x.duration, ...(x.exact !== undefined ? { exact: x.exact } : {}) };
+          titles[x.id] = x.title;
+        }
+        ids = chosen.map((x) => x.id);
+        order = def.order === 'sequential' ? 'ordered' : 'shuffled';
       } else {
         const chosen = await selectMovies(await movies(), def.movies!, source, look);
         for (const x of chosen) {
@@ -186,6 +209,8 @@ export async function resolveSchedule(file: ScheduleFile, source: LibrarySource)
   const titles: Record<string, string> = {};
   const notes: string[] = [];
 
+  const tags = tagIndexOf(file);
+
   // Clip lists.
   const listNames = new Set<string>();
   for (const p of [file.ads.head, file.ads.pre, file.ads.post, file.ads.tail, file.ads.mid]) if (p?.list) listNames.add(p.list);
@@ -200,11 +225,14 @@ export async function resolveSchedule(file: ScheduleFile, source: LibrarySource)
       throw new ResolveError(`there is no filler list named "${name}" (available: ${available.map((l) => l.name).join(', ') || 'none'})`);
     }
     fillerListIds[name] = found.id;
-    clips[name] = (await source.fillerListClips(found.id)).map((c) => ({ id: c.id, duration: c.duration, ...(c.exact !== undefined ? { exact: c.exact } : {}) }));
+    clips[name] = (await source.fillerListClips(found.id)).map((c) => {
+      const t = c.title ? tags.tagsOf(c.title) : [];
+      return { id: c.id, duration: c.duration, ...(c.exact !== undefined ? { exact: c.exact } : {}), ...(t.length > 0 ? { tags: t } : {}) };
+    });
   }
 
   // Pools.
-  const reader = makeLibraryReader(source, notes);
+  const reader = makeLibraryReader(source, notes, tags);
   const resolvePool = reader.pool;
   const episodesOfShow = reader.episodesOfShow;
   const pools: Record<string, Pool> = {};
@@ -271,6 +299,8 @@ export async function resolveSchedule(file: ScheduleFile, source: LibrarySource)
         at: s.at,
         pool: s.pool,
         ...(s.link ? { link: { name: s.link, mode: s.linkMode ?? 'continue' } } : {}),
+        ...(s.run ? { run: true as const } : {}),
+        ...(s.tags ? { tags: s.tags } : {}),
       });
     }
   });
@@ -309,7 +339,16 @@ export async function resolveSchedule(file: ScheduleFile, source: LibrarySource)
         : {}),
     },
     bumpers: file.bumpers,
-    ...(file.interstitial ? { interstitial: file.interstitial } : {}),
+    ...(file.interstitial
+      ? {
+          interstitial: {
+            list: file.interstitial.list,
+            ...(file.interstitial.length ? { length: file.interstitial.length } : {}),
+            ...(file.interstitial.cooldown !== undefined ? { cooldown: file.interstitial.cooldown } : {}),
+            ...(file.interstitial.cut !== undefined ? { cut: file.interstitial.cut } : {}),
+          },
+        }
+      : {}),
     pools,
     week,
     exceptions,

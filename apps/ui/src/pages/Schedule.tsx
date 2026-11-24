@@ -16,7 +16,7 @@ const parseTime = (t: string): number | undefined => {
   return m ? Number(m[1]) * HOUR + Number(m[2]) * 60_000 : undefined;
 };
 const hueOf = (pools: string[]) => (pool: string): number => (Math.max(0, pools.indexOf(pool)) * 57 + 210) % 360;
-const matches = (s: SlotModel, t: TemplateModel): boolean => s.pool === t.pool && s.length === t.length && s.link === t.link && s.linkMode === t.linkMode;
+const matches = (s: SlotModel, t: TemplateModel): boolean => s.pool === t.pool && s.length === t.length && s.link === t.link && s.linkMode === t.linkMode && s.run === t.run && same(s.tags, t.tags);
 
 export function Schedule({ name }: { name: string }) {
   const loaded = useLoad(() => api.scheduleModel(name), `sched:${name}`);
@@ -103,6 +103,10 @@ export function Schedule({ name }: { name: string }) {
     const key = keyOf(slot);
     let next: SlotModel = { ...slot, ...patch };
     if ('link' in patch && !patch.link) { delete next.link; delete next.linkMode; }
+    if (patch.link) delete next.run; // a run slot cannot be linked
+    if ('run' in patch && !patch.run) { delete next.run; delete next.tags; }
+    if (patch.run) { delete next.link; delete next.linkMode; }
+    if ('tags' in patch && (!patch.tags || patch.tags.length === 0)) delete next.tags;
     if (patch.at !== undefined || patch.day !== undefined) {
       const m = moveTo(week, slot, patch.day ?? slot.day, patch.at ?? slot.at, grid);
       if (!m) return; // never two slots at one moment
@@ -138,8 +142,8 @@ export function Schedule({ name }: { name: string }) {
         if (update && before) {
           for (const s of [...w]) {
             if (s.template !== tplName || !matches(s, before)) continue;
-            const { link: _l, linkMode: _m, ...rest } = s;
-            const merged: SlotModel = { ...rest, pool: t.pool, length: s.length, ...(t.link ? { link: t.link, linkMode: t.linkMode ?? 'continue' } : {}) };
+            const { link: _l, linkMode: _m, run: _r, tags: _t, ...rest } = s;
+            const merged: SlotModel = { ...rest, pool: t.pool, length: s.length, ...(t.link ? { link: t.link, linkMode: t.linkMode ?? 'continue' } : {}), ...(t.run ? { run: true as const } : {}), ...(t.tags ? { tags: t.tags } : {}) };
             const sized = resizeTo(w.filter((x) => keyOf(x) !== keyOf(s)), merged, t.length, grid);
             w = w.map((x) => (keyOf(x) === keyOf(s) ? sized : x));
           }
@@ -165,7 +169,7 @@ export function Schedule({ name }: { name: string }) {
     if (!n) return;
     if (templates[n]) { setError(`There is already a template called "${n}".`); return; }
     setError(undefined);
-    edit((d) => ({ ...d, templates: { ...d.templates, [n]: { pool: slot.pool, length: slot.length, ...(slot.link ? { link: slot.link, linkMode: slot.linkMode ?? 'continue' } : {}) } }, week: d.week.map((s) => (keyOf(s) === keyOf(slot) ? { ...s, template: n } : s)) }));
+    edit((d) => ({ ...d, templates: { ...d.templates, [n]: { pool: slot.pool, length: slot.length, ...(slot.link ? { link: slot.link, linkMode: slot.linkMode ?? 'continue' } : {}), ...(slot.run ? { run: true as const } : {}), ...(slot.tags ? { tags: slot.tags } : {}) } }, week: d.week.map((s) => (keyOf(s) === keyOf(slot) ? { ...s, template: n } : s)) }));
   };
   const changePool = (poolName: string, pool: PoolModel | null): void =>
     edit((d) => {
@@ -237,8 +241,15 @@ export function Schedule({ name }: { name: string }) {
             <select value={slot.pool} onChange={(e) => update({ pool: e.target.value })}>{poolNames.map((p) => <option key={p} value={p}>{p}</option>)}</select>
           </label>
           <div className="row">
+            <label><input type="checkbox" aria-label="Run of short items" checked={slot.run === true} onChange={(e) => update({ run: e.target.checked ? true : undefined })} />{' '}
+              A run of short items (music videos): they play back to back and only the slot starts and ends on the grid</label>
+            <label>Closer genres{' '}
+              <input aria-label="Closer genres" placeholder="any" value={(slot.tags ?? []).join(', ')} onChange={(e) => update({ tags: e.target.value.split(',').map((t) => t.trim()).filter(Boolean) })} />
+            </label>
+          </div>
+          <div className="row">
             <label>Linked to another slot{' '}
-              <select aria-label="Link" value={slot.link ? slot.linkMode ?? 'continue' : ''} onChange={(e) => {
+              <select aria-label="Link" disabled={slot.run === true} value={slot.link ? slot.linkMode ?? 'continue' : ''} onChange={(e) => {
                 if (e.target.value === '') update({ link: undefined });
                 else update({ link: slot.link ?? linkNames[0] ?? `${slot.pool}`, linkMode: e.target.value as 'continue' | 'rerun' });
               }}>

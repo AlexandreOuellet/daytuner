@@ -5,6 +5,8 @@ Terms are defined in [`glossary.md`](glossary.md).
 
 ## The grid
 
+A slot of the **run** kind ([`run-slots.md`](run-slots.md)) keeps the window rule below but has no grid inside it: its items play back to back, a bumper comes every N items, ads only at the very end, and a closer fills what is left.
+
 - A planned slot starts and ends on the grid (for example every 15 minutes), exactly. So do the
   blocks, except at the two edges: the first block of a slot that has a head (head bumper and head
   ads) starts when the head ends, and the last block of a slot that has a tail ends where the tail

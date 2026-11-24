@@ -9,6 +9,10 @@ export const DEFAULT_LENGTH = 2 * HOUR;
 /** What a pool holds, in a line: the shows, or the movie filter. */
 export function poolSummary(p: PoolModel | undefined): string {
   if (!p) return 'unknown pool';
+  if (p.raw && typeof p.raw['videos'] === 'object' && p.raw['videos'] !== null) {
+    const v = p.raw['videos'] as { path?: string; tag?: string | string[] };
+    return `videos in ${v.path ?? '?'}${v.tag ? `, ${([] as string[]).concat(v.tag).join(' or ')}` : ''}${p.order === 'sequential' ? '' : ' (shuffled)'}`;
+  }
   if (p.raw) return `${'shows' in p.raw ? 'shows' : 'movies'} by rules${p.order === 'shuffle' ? ' (shuffled)' : ''}`;
   if (p.shows) {
     const names = p.shows.map((s) => s.show);
@@ -61,7 +65,7 @@ export function Palette({ templates, pools, hueOf, armed, uses, onArm, onEdit }:
                 onClick={() => onArm(armed === name ? undefined : name)}
                 onDoubleClick={() => onEdit(name)}>
                 <strong>{name}</strong>
-                <small>{lengthText(t.length)} · {t.pool}</small>
+                <small>{lengthText(t.length)} · {t.pool}{t.run ? ' · run' : ''}</small>
                 <small>{poolSummary(pools[t.pool])}</small>
                 {t.link && <small>{t.linkMode === 'rerun' ? '↺' : '⇄'} {t.link}</small>}
                 <small className="muted">{uses[name] ? `${uses[name]} on the week` : 'not placed'}</small>
@@ -98,6 +102,8 @@ export function TemplateEditor({ name, template, taken, pools, grid, following, 
   const [minutes, setMinutes] = useState(String((template?.length ?? DEFAULT_LENGTH) / 60_000));
   const [link, setLink] = useState(template?.link ?? '');
   const [mode, setMode] = useState<'continue' | 'rerun'>(template?.linkMode ?? 'continue');
+  const [run, setRun] = useState(template?.run === true);
+  const [tags, setTags] = useState((template?.tags ?? []).join(', '));
   const [update, setUpdate] = useState(true);
   const [error, setError] = useState<string>();
 
@@ -107,7 +113,9 @@ export function TemplateEditor({ name, template, taken, pools, grid, following, 
     if (n.trim() !== name && taken.includes(n.trim())) return setError(`There is already a template called "${n.trim()}".`);
     if (!pool) return setError('Pick a pool.');
     if (!Number.isInteger(len) || len <= 0 || len % grid !== 0 || len > DAY * 7) return setError(`The length must be a whole number of minutes on the ${grid / 60_000}-minute grid.`);
-    onSave(n.trim(), { pool, length: len, ...(link.trim() ? { link: link.trim(), linkMode: mode } : {}) }, update);
+    if (run && link.trim()) return setError('A run slot cannot be linked.');
+    const tagList = tags.split(',').map((t) => t.trim()).filter(Boolean);
+    onSave(n.trim(), { pool, length: len, ...(link.trim() ? { link: link.trim(), linkMode: mode } : {}), ...(run ? { run: true as const } : {}), ...(tagList.length > 0 ? { tags: tagList } : {}) }, update);
   }
 
   return (
@@ -129,6 +137,10 @@ export function TemplateEditor({ name, template, taken, pools, grid, following, 
             <option value="continue">continues the same show</option><option value="rerun">reruns it</option>
           </select></label>
         )}
+      </div>
+      <div className="row">
+        <label><input type="checkbox" aria-label="Template is a run" checked={run} onChange={(e) => setRun(e.target.checked)} /> A run of short items (music videos), back to back, only the slot on the grid</label>
+        <label>Closer genres <input aria-label="Template closer genres" placeholder="any" value={tags} onChange={(e) => setTags(e.target.value)} /></label>
       </div>
       {name && following > 0 && (
         <label><input type="checkbox" checked={update} onChange={(e) => setUpdate(e.target.checked)} /> Also change the {following} slot{following === 1 ? '' : 's'} on the week placed from it (slots you changed by hand keep their change)</label>

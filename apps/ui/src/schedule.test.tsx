@@ -71,6 +71,15 @@ describe('week geometry', () => {
     expect(gaps.length).toBeGreaterThan(0);
     expect(gaps.every((g) => /plays a$/.test(String(g.extendedProps!['label'])))).toBe(true);
   });
+  it('places a run template as a run slot, with its closer genres', () => {
+    const s = place([], { pool: 'punk', length: 90 * 60_000, run: true, tags: ['Punk & Ska'], name: 'Punk run' }, 1, 17 * HOUR, G)!;
+    expect(s).toMatchObject({ pool: 'punk', run: true, tags: ['Punk & Ska'], template: 'Punk run', length: 90 * 60_000 });
+    expect(place([], { pool: 'p', length: HOUR }, 1, 17 * HOUR, G)).not.toHaveProperty('run');
+  });
+  it('says what a pool of videos holds', () => {
+    expect(poolSummary({ raw: { videos: { path: '/musicvideos', tag: ['Metal', 'Prog & Virtuoso'] } }, order: 'shuffle' })).toBe('videos in /musicvideos, Metal or Prog & Virtuoso (shuffled)');
+    expect(poolSummary({ raw: { videos: { path: '/musicvideos' } } })).toBe('videos in /musicvideos (shuffled)');
+  });
   it('summarises a pool in a line', () => {
     expect(poolSummary({ shows: [{ show: 'A' }, { show: 'B' }, { show: 'C' }, { show: 'D' }], order: 'shuffle' })).toBe('A, B, C +1 (shuffled)');
     expect(poolSummary({ movies: { genre: 'Comedy', duration: { op: '<=', ms: 117 * 60_000 } } })).toBe('Comedy movies <= 117 min');

@@ -4,7 +4,7 @@
 
 import type { Context, Hono } from 'hono';
 import { placeInList, type Clock } from '@daytuner/engine';
-import { addIds, adSettingsOf, languageName, applyAdSettings, applyScheduleModel, exceptionOccurrences, scheduleModelOf, type ExceptionModel, type ScheduleModel, findProgram, parseLocalDateTime, parseScheduleFile, resolveSchedule, type AdSettings } from '@daytuner/schedule';
+import { addIds, adSettingsOf, languageName, applyAdSettings, applyScheduleModel, exceptionOccurrences, scheduleModelOf, type ExceptionModel, type ScheduleModel, findProgram, parseLocalDateTime, parseScheduleFile, resolveSchedule, tagIndexOf, type AdSettings } from '@daytuner/schedule';
 import type { ChannelRecord, PinRecord, Store } from '@daytuner/store';
 import type { TunarrClient } from '@daytuner/tunarr-client';
 import {
@@ -352,7 +352,7 @@ export function registerActions(app: Hono, d: ActionDeps): void {
     const ch = d.channel(c.req.param('name'));
     const pools = (await bodyOf(c))['pools'];
     if (typeof pools !== 'object' || pools === null || Array.isArray(pools)) throw new BadRequest('the request needs "pools"');
-    return job(c, ch.name, 'read pools', async () => poolStats(d.client, pools as Parameters<typeof poolStats>[1]));
+    return job(c, ch.name, 'read pools', async () => poolStats(d.client, pools as Parameters<typeof poolStats>[1], tagIndexOf(parseScheduleFile(ch.schedule))));
   });
 
   /** What will air in a range: committed, staged and planned slots, with the plan for comparison where they differ. Writes nothing. */

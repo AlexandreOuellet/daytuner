@@ -3,9 +3,10 @@
 
 import { BlockDoesNotFit, buildBlock, type Block, type BlockAds, type BlockHead, type BlockInput, type BlockTail } from './block.js';
 import { fillWithClips, pickClip, type Clip } from './clips.js';
+import { fillCloser, isCloser } from './closer.js';
 import { dayOfWeek, startOfLocalDay, startOfNextLocalDay, toEpoch, toLocal, assertZone } from './clock.js';
 import { advanceSequence, emptyBag, markDrawn, orderedPick, pickFromBag, placeInList, type BagState, type SequenceState } from './pools.js';
-import type { RngState } from './rng.js';
+import { nextInt, type RngState } from './rng.js';
 import type {
   ExceptionDef, Item, ItemPosition, LockConflict, Library, PlanInput, PlanResult, PlanWarning, PlanWarningCode, PlannedSlot, Pool,
   Schedule, SlotDef, StagedWindow, WarningSeverity,
@@ -35,14 +36,17 @@ interface Work {
   rng: RngState;
   bags: Record<string, BagState>;
   sequences: Record<string, SequenceState>;
+  /** When each closer clip last aired, by `list:clipId` (the cooldown). */
+  played: Record<string, Ms>;
   warnings: PlanWarning[];
 }
 
-const cloneWork = (w: Work): Work => ({ rng: w.rng, bags: { ...w.bags }, sequences: { ...w.sequences }, warnings: [...w.warnings] });
+const cloneWork = (w: Work): Work => ({ rng: w.rng, bags: { ...w.bags }, sequences: { ...w.sequences }, played: { ...w.played }, warnings: [...w.warnings] });
 const adopt = (into: Work, from: Work): void => {
   into.rng = from.rng;
   into.bags = from.bags;
   into.sequences = from.sequences;
+  into.played = from.played;
   into.warnings = from.warnings;
 };
 
@@ -83,6 +87,7 @@ export function plan(input: PlanInput): PlanResult {
     rng: input.state.rng,
     bags: { ...input.state.bags },
     sequences: { ...input.state.sequences },
+    played: { ...(input.state.played ?? {}) },
     warnings: [],
   };
 
@@ -120,7 +125,8 @@ export function plan(input: PlanInput): PlanResult {
     warn(work, 'locked-slot-conflict', 'alert', start, held.slotId, `the locked slot could not be kept: ${c.message}`);
   }
   warnAboutUnmatchedExceptions(schedule, input.from, input.to, work);
-  return { slots, state: { rng: work.rng, sequences: work.sequences, bags: work.bags }, warnings: work.warnings, conflicts };
+  const played = Object.keys(work.played).length > 0 ? { played: work.played } : {};
+  return { slots, state: { rng: work.rng, sequences: work.sequences, bags: work.bags, ...played }, warnings: work.warnings, conflicts };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -144,7 +150,7 @@ function checkLocked(ctx: Ctx, w: Window, held: PlannedSlot): LockConflict | und
     } else if (it.kind === 'filler') {
       const clip = (ctx.library.clips[it.list] ?? []).find((c) => c.id === it.clipId);
       if (!clip) return fail('clip-gone', `clip ${it.clipId} is no longer in list ${it.list}`);
-      if (clip.duration !== it.duration) return fail('duration-changed', `clip ${it.clipId} now lasts ${clip.duration} ms, not ${it.duration}`);
+      if (it.cut ? it.duration > clip.duration : clip.duration !== it.duration) return fail('duration-changed', `clip ${it.clipId} now lasts ${clip.duration} ms, not ${it.duration}`);
     }
   }
   for (const [id, end] of reach) {
@@ -175,7 +181,13 @@ function applyLockedEffect(ctx: Ctx, work: Work, w: Window, held: PlannedSlot): 
     work.sequences[key] = advanceSequence(seq, pool.programs, (held.blocks.length > 0 ? held.blocks.filter((b) => !b.pinned).length : held.programs.length));
   }
   for (const it of held.items) {
-    if (it.kind === 'filler') work.bags[bagKey(it.list)] = markDrawn(work.bags[bagKey(it.list)] ?? emptyBag(), it.clipId);
+    if (it.kind !== 'filler') continue;
+    if (it.role === 'interstitial' && !it.cut) {
+      const cfg = ctx.schedule.interstitial;
+      if (cfg && isCloser(cfg)) work.played[`${it.list}:${it.clipId}`] = held.start;
+    }
+    // A cut clip stays in the bag, so it plays whole next time.
+    if (!it.cut) work.bags[bagKey(it.list)] = markDrawn(work.bags[bagKey(it.list)] ?? emptyBag(), it.clipId);
   }
 }
 
@@ -191,12 +203,18 @@ function validate(schedule: Schedule, library: Library): void {
   const lists = [
     schedule.ads.head?.list, schedule.ads.pre?.list, schedule.ads.mid?.list, schedule.ads.post?.list, schedule.ads.tail?.list,
     schedule.bumpers.head?.list, schedule.bumpers.pre?.list, schedule.bumpers.post?.list, schedule.bumpers.tail?.list,
-    schedule.interstitial?.list,
+    schedule.interstitial?.list, schedule.bumpers.rotation?.list,
   ];
   for (const l of lists) if (l !== undefined && !(l in library.clips)) throw new RangeError(`unknown clip list: ${l}`);
+  const rot = schedule.bumpers.rotation;
+  if (rot && (!Number.isInteger(rot.every.min) || !Number.isInteger(rot.every.max) || rot.every.min < 1 || rot.every.max < rot.every.min)) {
+    throw new RangeError(`bumpers.rotation.every must be a range of whole numbers from 1, got ${rot.every.min} to ${rot.every.max}`);
+  }
   const seen = new Set<string>();
   for (const s of schedule.week) {
     if (!(s.pool in schedule.pools)) throw new RangeError(`slot ${slotIdOf(s)} uses unknown pool ${s.pool}`);
+    if (s.run && schedule.pools[s.pool]!.order !== 'shuffled') throw new RangeError(`slot ${slotIdOf(s)} is a run slot, so pool ${s.pool} must be shuffled`);
+    if (s.run && s.link) throw new RangeError(`slot ${slotIdOf(s)} is a run slot and cannot be linked`);
     if (!isOnGrid(s.at, schedule.grid)) throw new RangeError(`slot ${slotIdOf(s)} is not on the ${schedule.grid} ms grid`);
     if (s.at < 0 || s.at >= DAY) throw new RangeError(`slot ${slotIdOf(s)} is not within a day`);
     if (seen.has(slotIdOf(s))) throw new RangeError(`slot ${slotIdOf(s)} is listed twice`);
@@ -333,6 +351,12 @@ function warn(work: Work, code: PlanWarningCode, severity: WarningSeverity, at: 
 
 function planWindow(ctx: Ctx, work: Work, w: Window): PlannedSlot {
   const { schedule } = ctx;
+  if (w.slot.run && !w.added && !w.exception) {
+    if (w.pins && Object.keys(w.pins).length > 0) {
+      warn(work, 'run-pins-ignored', 'warning', w.start, w.slotId, 'pins are not supported in a run slot, so they were ignored');
+    }
+    return planRun(ctx, work, w);
+  }
   const pool = w.added ? undefined : schedule.pools[w.slot.pool]!;
   let result: { placed: Placed[]; edges: Edges; explicit: boolean } | undefined;
   if (w.added) {
@@ -648,11 +672,11 @@ function layoutItems(ctx: Ctx, work: Work, w: Window, placed: Placed[], edges: E
     if (room <= 0) return [];
     const out: Item[] = [];
     let left = room;
-    const list = schedule.interstitial?.list;
-    if (list) {
-      const f = fill(room, list);
-      out.push(...clipItems(f.clips, 'interstitial', 'gap', list));
-      left = f.shortfall;
+    const cfg = schedule.interstitial;
+    if (cfg) {
+      const r = closerItems(ctx, work, w, room);
+      out.push(...r.items);
+      left = r.shortfall;
     }
     if (left > 0) {
       out.push({ kind: 'flex', duration: left });
@@ -723,4 +747,142 @@ function layoutItems(ctx: Ctx, work: Work, w: Window, placed: Placed[], edges: E
   });
 
   return items;
+}
+
+// ---------------------------------------------------------------------------------------------
+// The closer, and run slots (docs/run-slots.md).
+// ---------------------------------------------------------------------------------------------
+
+/** The closer clips for `room`, with the bag, the cooldown and the played times updated. */
+function closerItems(ctx: Ctx, work: Work, w: Window, room: Ms): { items: Item[]; shortfall: Ms } {
+  const cfg = ctx.schedule.interstitial!;
+  const key = bagKey(cfg.list);
+  const prefix = `${cfg.list}:`;
+  const playedAt: Record<string, Ms> = {};
+  for (const [k, v] of Object.entries(work.played)) if (k.startsWith(prefix)) playedAt[k.slice(prefix.length)] = v;
+  const f = fillCloser(room, ctx.library.clips[cfg.list] ?? [], cfg, work.bags[key] ?? emptyBag(), work.rng, playedAt, w.start, w.slot.tags);
+  work.bags[key] = f.bag;
+  work.rng = f.rng;
+  const items: Item[] = [];
+  for (const p of f.pieces) {
+    items.push({ kind: 'filler', role: 'interstitial', position: 'gap', list: cfg.list, clipId: p.clip.id, duration: p.duration, ...(p.cut ? { cut: true as const } : {}) });
+    if (p.cut) warn(work, 'closer-cut', 'info', w.end - p.duration, w.slotId, `clip ${p.clip.id} was cut off after ${Math.round(p.duration / 1000)} s at the end of the slot`);
+    else if (isCloser(cfg)) work.played[`${cfg.list}:${p.clip.id}`] = w.start;
+  }
+  if (f.cooldownExhausted) warn(work, 'closer-repeat', 'info', w.start, w.slotId, `every clip of ${cfg.list} is inside its cooldown, so some repeat`);
+  return { items, shortfall: f.shortfall };
+}
+
+/** A run slot: short items back to back, only the window on the grid. Rules: docs/run-slots.md. */
+function planRun(ctx: Ctx, work: Work, w: Window): PlannedSlot {
+  const { schedule, library } = ctx;
+  const pool = schedule.pools[w.slot.pool]!;
+  const poolBag = poolKey(w.slot.pool);
+  const step = schedule.ads.step;
+  const windowLength = w.end - w.start;
+
+  const clipItems = (clips: readonly Clip[], role: 'ad' | 'bumper', position: ItemPosition, list: string): Item[] =>
+    clips.map((c) => ({ kind: 'filler', role, position, list, clipId: c.id, duration: c.duration }));
+  const adsOf = (position: 'head' | 'pre' | 'post'): Item[] => {
+    const a = schedule.ads[position];
+    if (!a || a.range.min <= 0) return [];
+    const f = fillWithClips(a.range.min, library.clips[a.list] ?? [], work.bags[bagKey(a.list)] ?? emptyBag(), work.rng);
+    work.bags[bagKey(a.list)] = f.bag;
+    work.rng = f.rng;
+    return clipItems(f.clips, 'ad', position, a.list);
+  };
+  const bumperOf = (position: 'head' | 'pre' | 'post' | 'tail' | 'rotation'): Item[] => {
+    const list = schedule.bumpers[position]?.list;
+    const c = drawBumper(ctx, work, list);
+    return c && list ? clipItems([c], 'bumper', position, list) : [];
+  };
+  const total = (items: readonly Item[]): Ms => items.reduce((a, i) => a + i.duration, 0);
+  const adTotal = (items: readonly Item[]): Ms => items.filter((i) => i.kind === 'filler' && i.role === 'ad').reduce((a, i) => a + i.duration, 0);
+
+  const head = [...bumperOf('head'), ...adsOf('head')];
+  const preAds = adsOf('pre');
+  const preBumper = bumperOf('pre');
+  const postBumper = bumperOf('post');
+  const postAds = adsOf('post');
+  const tailBumper = bumperOf('tail');
+  const tailAds = schedule.ads.tail;
+  const tailMin = tailAds?.range.min ?? 0;
+  const edgesAfter = total(postBumper) + total(postAds) + total(tailBumper) + tailMin;
+
+  const rotation = schedule.bumpers.rotation;
+  const every = (): Ms => {
+    if (!rotation) return Infinity;
+    const [n, next] = nextInt(work.rng, rotation.every.max - rotation.every.min + 1);
+    work.rng = next;
+    return rotation.every.min + n;
+  };
+
+  const body: Item[] = [];
+  const programs: string[] = [];
+  const spans: { programId: string; end: Ms }[] = [];
+  let t = w.start + total(head) + total(preAds) + total(preBumper);
+  const limit = w.end - edgesAfter;
+  let since = 0;
+  let target = every();
+  let pending: Item[] = [];
+  for (;;) {
+    const room = limit - t - total(pending);
+    const bag = work.bags[poolBag] ?? emptyBag();
+    const r = pickFromBag(pool.programs, bag, work.rng, (id) => library.programs[id]!.duration <= room);
+    work.rng = r.rng;
+    if (r.pick === undefined) break;
+    work.bags[poolBag] = r.bag;
+    if (r.repeat) warn(work, 'repeat-pick', 'info', t, w.slotId, `${r.pick} was shown again: nothing left in the pool's round fit the remaining time`);
+    const duration = library.programs[r.pick]!.duration;
+    body.push(...pending);
+    t += total(pending);
+    pending = [];
+    body.push({ kind: 'content', programId: r.pick, startOffset: 0, duration });
+    programs.push(r.pick);
+    t += duration;
+    spans.push({ programId: r.pick, end: t });
+    since++;
+    if (since >= target) {
+      pending = bumperOf('rotation');
+      since = 0;
+      target = every();
+    }
+  }
+  // A bumper drawn after the last item is not used: its time goes to the end of the slot.
+  const placedAny = programs.length > 0;
+  const pre = placedAny ? [...preAds, ...preBumper] : [];
+  const postItems = placedAny ? [...postBumper, ...postAds] : [];
+  const tailBumperItems = tailBumper;
+
+  // The end: the closer, then dead air, then the tail's ads and bumper.
+  let left = limit - t + (placedAny ? 0 : total(preAds) + total(preBumper) + total(postBumper) + total(postAds));
+  const adsUsed = adTotal(head) + adTotal(pre) + adTotal(postItems);
+  const capAds = Math.floor((windowLength * schedule.ads.ratio.max) / step) * step;
+  const absorb = tailAds ? Math.max(0, Math.floor(Math.min(tailAds.range.max - tailAds.range.min, capAds - adsUsed - tailMin) / step) * step) : 0;
+  const closer = schedule.interstitial ? closerItems(ctx, work, w, Math.max(0, left - absorb)) : { items: [] as Item[], shortfall: 0 };
+  const closerLength = total(closer.items);
+  left -= closerLength;
+  const tailRoom = tailMin + Math.min(left, absorb);
+  let tailItems: Item[] = [];
+  let tailFilled = 0;
+  if (tailAds && tailRoom > 0) {
+    const f = fillWithClips(tailRoom, library.clips[tailAds.list] ?? [], work.bags[bagKey(tailAds.list)] ?? emptyBag(), work.rng);
+    work.bags[bagKey(tailAds.list)] = f.bag;
+    work.rng = f.rng;
+    tailItems = clipItems(f.clips, 'ad', 'tail', tailAds.list);
+    tailFilled = total(tailItems);
+  }
+  const dead = left + tailMin - tailFilled;
+  const flex: Item[] = dead > 0 ? [{ kind: 'flex', duration: dead }] : [];
+  if (dead >= 15_000) {
+    warn(work, 'dead-air', dead >= schedule.grid ? 'alert' : dead >= MINUTE ? 'warning' : 'info', w.end - total(tailBumperItems) - tailFilled - dead, w.slotId, `${Math.round(dead / 1000)} s of dead air`);
+  }
+
+  const items: Item[] = [...head, ...pre, ...body, ...postItems, ...closer.items, ...flex, ...tailItems, ...tailBumperItems];
+  const sum = total(items);
+  if (sum !== windowLength) throw new Error(`internal error: run slot ${w.slotId} adds up to ${sum} ms but its window is ${windowLength} ms`);
+
+  // Blocks: one per item, back to back; the first starts at the window's start and the last ends at its end.
+  const blocks = spans.map((sp, i) => ({ programId: sp.programId, start: i === 0 ? w.start : spans[i - 1]!.end, end: i === spans.length - 1 ? w.end : sp.end }));
+  return { slotId: w.slotId, start: w.start, end: w.end, pool: w.slot.pool, programs, blocks, exception: false, run: true, items };
 }

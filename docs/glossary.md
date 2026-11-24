@@ -41,6 +41,12 @@ word, this one wins.
   ends on the grid, except the first block of a planned slot with a head (it starts when the head
   ends) and the last block of one with a tail (it ends where the tail starts). Blocks are not locked
   or committed on their own: the planned slot is.
+- **Run slot**: a slot planned as one run of short items (music videos) back to back, with no grid inside the window: only the
+  window's start and end are on the grid. Bumpers go in every N items, ads only at the very end. See [`run-slots.md`](run-slots.md)
+  (design, not built).
+- **Closer**: the one or several shorter items (a 2 to 30 minute video or live performance) that fill the time left before the tail,
+  so that a slot ends on the grid. It is the interstitial list under a clearer name, played from a bag with a cooldown and never
+  replayed because it fits (a cooldown applies; a repeat or a cut-off clip is the fallback, never dead air or a long run of ads).
 - **Position**: where inserted clips can go: **head** (start of a planned slot), **pre** (before a
   program), **mid** (breaks inside a program), **post** (after a program), **tail** (end of a planned
   slot). Head and tail belong to the planned slot; pre, mid and post belong to a block.

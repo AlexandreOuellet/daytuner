@@ -304,7 +304,7 @@ async function committedIn(client: TunarrClient, ch: { tunarrId: string; schedul
   }
   if (range.from >= info.startTime + info.duration) return [];
   const settings = adSettingsOf(parseScheduleFile(ch.schedule));
-  const bumperLists = new Set(Object.values(settings.bumpers));
+  const bumperLists = new Set([...Object.values(settings.bumpers), ...(settings.rotation ? [settings.rotation.list] : [])]);
   const names = new Map((await client.fillerLists()).map((l) => [l.id, l.name]));
   const name = (id: string): string => names.get(id) ?? id;
   return blocksFromLineup(held.lineup, info.startTime, range, (id, type) => (type === 'fallback' ? 'interstitial' : bumperLists.has(name(id)) ? 'bumper' : 'ad'), name);

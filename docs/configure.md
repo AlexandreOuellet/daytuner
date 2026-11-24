@@ -44,7 +44,13 @@ commented example. In short:
 - `week`: for each day, the slots, each with a start time and a pool. A slot lasts until the next one starts, or for its
   `length`. A slot can be *linked* to another to continue its show or rerun it.
 - `ads` and `bumpers`: what plays in each break position (head, mid, post, tail), and its length. See
-  [`planning-rules.md`](planning-rules.md) and [`web-ads.md`](web-ads.md).
+  [`planning-rules.md`](planning-rules.md) and [`web-ads.md`](web-ads.md). `bumpers.rotation` is the position of a run slot: a bumper
+  after every N items (`every: 3-4`).
+- `interstitial`: the closer, the clips that fill the time left before the tail. `length`, `cooldown` and `cut` make it the closer of
+  [`run-slots.md`](run-slots.md).
+- `run: true` on a slot makes it a **run slot**: short items back to back, only the window on the grid. `tags` on a slot limits its
+  closer's clips by genre. `tagsCsv` holds the channel's tags (a CSV of `genre,file`). A pool can be `videos: { path, tag }`, local
+  videos by folder. A worked example: [`schedules/rock-hard-television.example.yaml`](../schedules/rock-hard-television.example.yaml).
 - `exceptions`: special days (a date and time, and what plays), which win over the week.
 
 The rules the planner follows are in [`planning-rules.md`](planning-rules.md); the words (slot, block, window) in

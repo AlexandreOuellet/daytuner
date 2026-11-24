@@ -45,6 +45,11 @@ Repository, documentation, the verified API facts, and the script that verified 
 - Stage a date range, edit a day in staging (delete, add, resize slots; pin programs), re-plan only what changed.
 - Metrics dashboard: the metrics per channel and over time.
 
+## Added after the first plan
+- **Run slots** ([`run-slots.md`](run-slots.md)): a slot of back-to-back short items with only the window on the grid, a bumper every N
+  items, a closer, ads only at the end, genre tags from a CSV and a pool of local videos. Needed for a music channel (Rock Hard
+  Television). Built; a real run on a test copy of Tunarr is still to do.
+
 ## Decided
 - Name: DayTuner. Licence: MIT.
 - Language: TypeScript.

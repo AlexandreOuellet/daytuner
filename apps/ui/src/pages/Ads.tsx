@@ -171,9 +171,37 @@ export function Ads({ name }: { name: string }) {
       </div>
 
       <div className="editor">
-        <h2>Whatever nothing else fills</h2>
-        <p className="muted small">Clips (music videos, public service messages…) that fill a gap no ad can. What they cannot fill is dead air.</p>
-        <ListSelect id="interstitial" label="Fill gaps from" value={draft.interstitial} lists={lists} onChange={(v) => edit((s) => { const { interstitial: _gone, ...rest } = s; return v ? { ...rest, interstitial: v } : rest; })} />
+        <h2>Between the items of a run</h2>
+        <p className="muted small">For slots that are a run of short items (music videos): a bumper after every few items, a different count each time so the end of the slot can be reached exactly. Ads never go between items.</p>
+        <ListSelect id="rotation-list" label="Bumper between items from" value={draft.rotation?.list} lists={lists}
+          onChange={(v) => edit((s) => { const { rotation: _gone, ...rest } = s; return v ? { ...rest, rotation: { list: v, every: s.rotation?.every ?? { min: 3, max: 4 } } } : rest; })} />
+        {draft.rotation && (
+          <>
+            <label htmlFor="rotation-min">after every <input id="rotation-min" type="number" min={1} step={1} value={draft.rotation.every.min}
+              onChange={(e) => edit((s) => s.rotation ? { ...s, rotation: { ...s.rotation, every: { min: Math.max(1, Math.round(Number(e.target.value)) || 1), max: Math.max(s.rotation.every.max, Math.max(1, Math.round(Number(e.target.value)) || 1)) } } } : s)} /></label>
+            <label htmlFor="rotation-max">to <input id="rotation-max" type="number" min={1} step={1} value={draft.rotation.every.max}
+              onChange={(e) => edit((s) => s.rotation ? { ...s, rotation: { ...s.rotation, every: { min: Math.min(s.rotation.every.min, Math.max(1, Math.round(Number(e.target.value)) || 1)), max: Math.max(1, Math.round(Number(e.target.value)) || 1) } } } : s)} /> items</label>
+          </>
+        )}
+      </div>
+
+      <div className="editor">
+        <h2>Whatever nothing else fills (the closer)</h2>
+        <p className="muted small">Clips (live sets, music videos, public service messages…) that fill the time left before the tail, so a slot ends on the grid. What they cannot fill is dead air.</p>
+        <ListSelect id="interstitial" label="Fill gaps from" value={draft.interstitial} lists={lists} onChange={(v) => edit((s) => { const { interstitial: _gone, closer: _c, ...rest } = s; return v ? { ...rest, ...(s.closer ? { closer: s.closer } : {}), interstitial: v } : rest; })} />
+        {draft.interstitial && (
+          <details open={draft.closer !== undefined}><summary>Closer rules</summary>
+            <p className="muted small">Without these the list behaves as before. With them, a clip is never replayed just because it fits, and it may be cut off at the end of the slot rather than leave dead air.</p>
+            <Num id="closer-min" label="Only clips of at least (minutes)" step={0.5} value={Number(minutes(draft.closer?.length?.min ?? 0))}
+              onChange={(v) => edit((s) => ({ ...s, closer: { ...s.closer, length: { min: ms(v), max: Math.max(ms(v), s.closer?.length?.max ?? 30 * 60_000) } } }))} />
+            <Num id="closer-max" label="and at most (minutes)" step={0.5} value={Number(minutes(draft.closer?.length?.max ?? 30 * 60_000))}
+              onChange={(v) => edit((s) => ({ ...s, closer: { ...s.closer, length: { min: Math.min(s.closer?.length?.min ?? 0, ms(v)), max: ms(v) } } }))} />
+            <Num id="closer-cooldown" label="A clip does not repeat within (days)" step={1} value={Math.round((draft.closer?.cooldown ?? 0) / 86_400_000)}
+              onChange={(v) => edit((s) => { const { cooldown: _d, ...rest } = s.closer ?? {}; return { ...s, closer: v === 0 ? rest : { ...rest, cooldown: Math.round(v) * 86_400_000 } }; })} />
+            <label htmlFor="closer-cut"><input id="closer-cut" type="checkbox" checked={draft.closer?.cut === true}
+              onChange={(e) => edit((s) => { const { cut: _x, ...rest } = s.closer ?? {}; return { ...s, closer: e.target.checked ? { ...rest, cut: true } : rest }; })} /> The last clip may be cut off at the end of the slot</label>
+          </details>
+        )}
       </div>
 
       <div className="editor">

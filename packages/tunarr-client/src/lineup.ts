@@ -23,7 +23,7 @@ function offset(n: number): number {
 
 /**
  * @param fillerListIds Tunarr's id for each clip list name the engine used.
- * The interstitial position (`gap`) is Tunarr's `fallback`.
+ * The interstitial position (`gap`) is Tunarr's `fallback`, and a run slot's `rotation` bumper is `mid`.
  */
 export function toLineupItems(slots: readonly PlannedSlot[], fillerListIds: Readonly<Record<string, string>>): LineupItem[] {
   const out: LineupItem[] = [];
@@ -49,7 +49,7 @@ function convert(item: Item, fillerListIds: Readonly<Record<string, string>>): L
         type: 'filler',
         id: item.clipId,
         fillerListId,
-        fillerType: item.position === 'gap' ? 'fallback' : item.position,
+        fillerType: item.position === 'gap' ? 'fallback' : item.position === 'rotation' ? 'mid' : item.position,
         duration: whole(item.duration, 'filler duration'),
       };
     }
